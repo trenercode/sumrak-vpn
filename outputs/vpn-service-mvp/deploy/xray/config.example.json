@@ -3,7 +3,7 @@
   "api": {
     "tag": "api",
     "listen": "127.0.0.1:10085",
-    "services": ["HandlerService", "StatsService", "ReflectionService"]
+    "services": ["StatsService", "ReflectionService"]
   },
   "policy": {
     "levels": {
@@ -15,7 +15,7 @@
     {
       "tag": "vless-reality",
       "listen": "0.0.0.0",
-      "port": 443,
+      "port": 8443,
       "protocol": "vless",
       "settings": {"clients": [], "decryption": "none"},
       "streamSettings": {

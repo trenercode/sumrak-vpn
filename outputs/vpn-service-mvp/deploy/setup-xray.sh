@@ -4,6 +4,7 @@ set -euo pipefail
 XRAY_IMAGE="${XRAY_IMAGE:-ghcr.io/xtls/xray-core:latest}"
 REALITY_TARGET="${REALITY_TARGET:-www.microsoft.com:443}"
 REALITY_SERVER_NAME="${REALITY_SERVER_NAME:-www.microsoft.com}"
+XRAY_PORT="${XRAY_PORT:-8443}"
 CONFIG_DIR="${CONFIG_DIR:-deploy/xray}"
 
 if ! command -v docker >/dev/null; then
@@ -35,7 +36,7 @@ cat > "${CONFIG_DIR}/config.json" <<EOF
   "api": {
     "tag": "api",
     "listen": "127.0.0.1:10085",
-    "services": ["HandlerService", "StatsService", "ReflectionService"]
+    "services": ["StatsService", "ReflectionService"]
   },
   "policy": {
     "levels": {
@@ -47,7 +48,7 @@ cat > "${CONFIG_DIR}/config.json" <<EOF
     {
       "tag": "vless-reality",
       "listen": "0.0.0.0",
-      "port": 443,
+      "port": ${XRAY_PORT},
       "protocol": "vless",
       "settings": {"clients": [], "decryption": "none"},
       "streamSettings": {
@@ -77,6 +78,7 @@ EOF
 cat > "${CONFIG_DIR}/reality.env" <<EOF
 VPN_BACKEND=xray
 XRAY_REALITY_SERVER_NAME=${REALITY_SERVER_NAME}
+XRAY_PUBLIC_PORT=${XRAY_PORT}
 XRAY_REALITY_PUBLIC_KEY=${PUBLIC_KEY}
 XRAY_REALITY_SHORT_ID=${SHORT_ID}
 EOF

@@ -4,12 +4,13 @@
 
 ## Основной транспорт
 
-Используется `VLESS + REALITY + XTLS Vision` поверх RAW/TCP на порту `443`.
+Используется `VLESS + REALITY + XTLS Vision` поверх RAW/TCP на порту `8443`.
 
 - REALITY маскирует TLS-handshake под выбранный обычный HTTPS-сайт.
 - XTLS Vision рассчитан на высокую производительность.
 - Каждому устройству выдается отдельный UUID.
-- Пользователи добавляются и удаляются без перезапуска Xray через локальный gRPC API.
+- Пользователи добавляются в `settings.clients` конфигурации Xray.
+- После добавления или удаления клиента контейнер Xray перезапускается.
 
 Абсолютно неблокируемых протоколов не существует. Для публичного сервиса нужно
 использовать несколько узлов у разных хостеров, следить за доступностью из разных сетей
@@ -31,7 +32,7 @@ VLESS Reality.
 
 ## Архитектура
 
-- `xray`: VLESS Reality сервер на TCP/443 и локальный API на `127.0.0.1:10085`;
+- `xray`: VLESS Reality сервер на TCP/8443 и локальный API статистики;
 - `bot`: Telegram-интерфейс и минутная синхронизация подписок;
 - `web`: FastAPI-админка;
 - `db`: PostgreSQL.
@@ -53,7 +54,7 @@ python -m app.bot
 ## Развертывание на пробном сервере
 
 Нужен Ubuntu/Debian-сервер с публичным IPv4, Docker Compose и свободным TCP-портом
-`443`. Домен для REALITY не обязателен: клиент может подключаться напрямую по IP.
+`8443`. Домен для REALITY не обязателен: клиент может подключаться напрямую по IP.
 
 ```bash
 cp .env.example .env
@@ -82,40 +83,54 @@ curl http://127.0.0.1:8000/health
 docker compose logs -f xray bot
 ```
 
-В firewall должен быть открыт `TCP/443`. Не открывайте наружу Xray API `10085`,
+В firewall должен быть открыт `TCP/8443`. Не открывайте наружу Xray API `10085`,
 PostgreSQL или админку без HTTPS и ограничения доступа.
 
-## Проверка Xray API через grpcurl
+Если `deploy/xray/config.json` уже был создан старой версией проекта, установите в
+inbound `vless-reality` значение `"port": 8443`, оставьте `serverNames` со значением
+`www.microsoft.com` и удалите `HandlerService` из списка `api.services`. Существующий
+массив `settings.clients` сохраняйте: приложение продолжит управлять им.
 
-Xray использует собственный `xray.common.serial.TypedMessage`, а не
-`google.protobuf.Any`. Поэтому `AlterInboundRequest.operation` должен содержать поля
-`type` и `value`, где `value` — base64-сериализованный protobuf операции.
+## Управление клиентами Xray
 
-Проверить доступность API и схему:
+Для MVP приложение не использует `HandlerService/AlterInbound`. При создании устройства
+оно добавляет объект клиента в:
 
-```bash
-docker compose exec bot grpcurl -plaintext \
-  127.0.0.1:10085 \
-  describe xray.app.proxyman.command.HandlerService.AlterInbound
+```json
+{
+  "id": "UUID устройства",
+  "email": "уникальный ID статистики",
+  "flow": "xtls-rprx-vision"
+}
 ```
 
-Добавить тестового VLESS-пользователя:
+Путь в конфигурации:
 
-```bash
-docker compose exec -T bot python -c \
-  'import json; from app.vpn import ADD_USER_OPERATION,add_user_operation_value,alter_inbound_payload; print(json.dumps(alter_inbound_payload("vless-reality",ADD_USER_OPERATION,add_user_operation_value("11111111-1111-1111-1111-111111111111","grpcurl-test@vpn.local"))))' \
-| docker compose exec -T bot grpcurl -plaintext -d @ \
-  127.0.0.1:10085 xray.app.proxyman.command.HandlerService/AlterInbound
+```text
+inbounds[tag=vless-reality].settings.clients
 ```
 
-Удалить тестового пользователя:
+Изменение записывается атомарно под файловой блокировкой. Если список клиентов
+действительно изменился, приложение перезапускает контейнер `vpn-xray` через локальный
+Docker socket. Повторная синхронизация существующего клиента не вызывает перезапуск.
+
+Проверить список клиентов:
 
 ```bash
-docker compose exec -T bot python -c \
-  'import json; from app.vpn import REMOVE_USER_OPERATION,remove_user_operation_value,alter_inbound_payload; print(json.dumps(alter_inbound_payload("vless-reality",REMOVE_USER_OPERATION,remove_user_operation_value("grpcurl-test@vpn.local"))))' \
-| docker compose exec -T bot grpcurl -plaintext -d @ \
-  127.0.0.1:10085 xray.app.proxyman.command.HandlerService/AlterInbound
+docker compose exec bot python -c \
+  'import json; c=json.load(open("/data/xray/config.json")); print(next(i for i in c["inbounds"] if i["tag"]=="vless-reality")["settings"]["clients"])'
 ```
+
+Проверить конфигурацию и выполнить ручной перезапуск:
+
+```bash
+docker compose run --rm xray run -test -config /etc/xray/config.json
+docker restart vpn-xray
+```
+
+`bot` и `web` имеют доступ к `/var/run/docker.sock`, поэтому админку необходимо закрыть
+от публичного доступа и защитить сильным паролем. Для следующей версии управление
+конфигом и перезапуск следует вынести в отдельный минимальный node-agent.
 
 ## Выбор REALITY target
 

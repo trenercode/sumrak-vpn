@@ -1,61 +1,16 @@
 import asyncio
-import base64
+import fcntl
 import json
+import os
 import secrets
+import stat
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from pathlib import Path
 from urllib.parse import quote, urlencode
 
 from app.config import Settings
-
-ADD_USER_OPERATION = "xray.app.proxyman.command.AddUserOperation"
-REMOVE_USER_OPERATION = "xray.app.proxyman.command.RemoveUserOperation"
-VLESS_ACCOUNT = "xray.proxy.vless.Account"
-
-
-def _protobuf_varint(value: int) -> bytes:
-    result = bytearray()
-    while value > 0x7F:
-        result.append((value & 0x7F) | 0x80)
-        value >>= 7
-    result.append(value)
-    return bytes(result)
-
-
-def _protobuf_bytes(field_number: int, value: bytes) -> bytes:
-    return _protobuf_varint((field_number << 3) | 2) + _protobuf_varint(len(value)) + value
-
-
-def _protobuf_string(field_number: int, value: str) -> bytes:
-    return _protobuf_bytes(field_number, value.encode())
-
-
-def _typed_message(message_type: str, value: bytes) -> bytes:
-    return _protobuf_string(1, message_type) + _protobuf_bytes(2, value)
-
-
-def add_user_operation_value(credential: str, client_email: str) -> str:
-    account = _protobuf_string(1, credential) + _protobuf_string(2, "xtls-rprx-vision")
-    user = _protobuf_string(2, client_email) + _protobuf_bytes(
-        3, _typed_message(VLESS_ACCOUNT, account)
-    )
-    operation = _protobuf_bytes(1, user)
-    return base64.b64encode(operation).decode()
-
-
-def remove_user_operation_value(client_email: str) -> str:
-    return base64.b64encode(_protobuf_string(1, client_email)).decode()
-
-
-def alter_inbound_payload(tag: str, operation_type: str, operation_value: str) -> dict:
-    return {
-        "tag": tag,
-        "operation": {
-            "type": operation_type,
-            "value": operation_value,
-        },
-    }
 
 
 @dataclass(frozen=True)
@@ -125,6 +80,85 @@ class MockVpnBackend(VpnBackend):
 
 
 class XrayBackend(VpnBackend):
+    def _mutate_clients(
+        self, *, credential: str | None = None, client_email: str, remove: bool = False
+    ) -> bool:
+        config_path = Path(self.settings.xray_config_path)
+        lock_path = config_path.with_suffix(f"{config_path.suffix}.lock")
+        lock_path.parent.mkdir(parents=True, exist_ok=True)
+
+        with lock_path.open("w") as lock_file:
+            fcntl.flock(lock_file, fcntl.LOCK_EX)
+            config = json.loads(config_path.read_text())
+            inbound = next(
+                (
+                    item
+                    for item in config.get("inbounds", [])
+                    if item.get("tag") == self.settings.xray_inbound_tag
+                ),
+                None,
+            )
+            if inbound is None:
+                raise RuntimeError(
+                    f"Xray inbound {self.settings.xray_inbound_tag!r} not found"
+                )
+
+            clients = inbound.setdefault("settings", {}).setdefault("clients", [])
+            existing = next(
+                (item for item in clients if item.get("email") == client_email), None
+            )
+            if remove:
+                if existing is None:
+                    return False
+                clients.remove(existing)
+            else:
+                if credential is None:
+                    raise ValueError("credential is required when adding an Xray client")
+                desired = {
+                    "id": credential,
+                    "email": client_email,
+                    "flow": "xtls-rprx-vision",
+                }
+                if existing == desired:
+                    return False
+                if existing is None:
+                    clients.append(desired)
+                else:
+                    existing.clear()
+                    existing.update(desired)
+
+            temporary_path = config_path.with_suffix(f"{config_path.suffix}.tmp")
+            with temporary_path.open("w") as output:
+                json.dump(config, output, ensure_ascii=True, indent=2)
+                output.write("\n")
+                output.flush()
+                os.fsync(output.fileno())
+            os.chmod(temporary_path, stat.S_IMODE(config_path.stat().st_mode))
+            os.replace(temporary_path, config_path)
+            return True
+
+    async def _restart_xray(self) -> None:
+        reader, writer = await asyncio.open_unix_connection(self.settings.docker_socket_path)
+        path = f"/containers/{quote(self.settings.xray_container_name, safe='')}/restart?t=10"
+        writer.write(
+            (
+                f"POST {path} HTTP/1.1\r\n"
+                "Host: docker\r\n"
+                "Content-Length: 0\r\n"
+                "Connection: close\r\n\r\n"
+            ).encode()
+        )
+        await writer.drain()
+        status_line = await reader.readline()
+        response = await reader.read()
+        writer.close()
+        await writer.wait_closed()
+        if b" 204 " not in status_line:
+            raise RuntimeError(
+                f"Failed to restart Xray container: {status_line.decode().strip()} "
+                f"{response.decode(errors='replace').strip()}"
+            )
+
     async def _grpc(self, method: str, payload: dict) -> dict:
         process = await asyncio.create_subprocess_exec(
             "grpcurl",
@@ -138,10 +172,7 @@ class XrayBackend(VpnBackend):
         )
         stdout, stderr = await process.communicate()
         if process.returncode:
-            error = stderr.decode().strip()
-            if "already exists" in error.lower() or "not found" in error.lower():
-                return {}
-            raise RuntimeError(f"Xray API failed: {error}")
+            raise RuntimeError(f"Xray API failed: {stderr.decode().strip()}")
         output = stdout.decode().strip()
         return json.loads(output) if output else {}
 
@@ -151,24 +182,18 @@ class XrayBackend(VpnBackend):
         return PeerProfile(credential, client_email, self.render_uri(credential, label))
 
     async def activate_peer(self, credential: str, client_email: str) -> None:
-        await self._grpc(
-            "xray.app.proxyman.command.HandlerService/AlterInbound",
-            alter_inbound_payload(
-                self.settings.xray_inbound_tag,
-                ADD_USER_OPERATION,
-                add_user_operation_value(credential, client_email),
-            ),
+        changed = await asyncio.to_thread(
+            self._mutate_clients, credential=credential, client_email=client_email
         )
+        if changed:
+            await self._restart_xray()
 
     async def revoke_peer(self, client_email: str) -> None:
-        await self._grpc(
-            "xray.app.proxyman.command.HandlerService/AlterInbound",
-            alter_inbound_payload(
-                self.settings.xray_inbound_tag,
-                REMOVE_USER_OPERATION,
-                remove_user_operation_value(client_email),
-            ),
+        changed = await asyncio.to_thread(
+            self._mutate_clients, client_email=client_email, remove=True
         )
+        if changed:
+            await self._restart_xray()
 
     async def peer_stats(self) -> dict[str, PeerStats]:
         response = await self._grpc(

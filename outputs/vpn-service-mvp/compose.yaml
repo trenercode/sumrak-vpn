@@ -1,11 +1,12 @@
 services:
   xray:
     image: ghcr.io/xtls/xray-core:latest
+    container_name: vpn-xray
     restart: unless-stopped
     command: run -config /etc/xray/config.json
     network_mode: host
     volumes:
-      - ./deploy/xray/config.json:/etc/xray/config.json:ro
+      - ./deploy/xray:/etc/xray:ro
 
   db:
     image: postgres:16-alpine
@@ -30,6 +31,9 @@ services:
     env_file: .env
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000
     network_mode: host
+    volumes:
+      - ./deploy/xray:/data/xray
+      - /var/run/docker.sock:/var/run/docker.sock
     depends_on:
       db:
         condition: service_healthy
@@ -42,6 +46,9 @@ services:
     env_file: .env
     command: python -m app.bot
     network_mode: host
+    volumes:
+      - ./deploy/xray:/data/xray
+      - /var/run/docker.sock:/var/run/docker.sock
     depends_on:
       db:
         condition: service_healthy

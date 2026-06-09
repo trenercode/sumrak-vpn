@@ -1,15 +1,20 @@
-import base64
+import asyncio
+import json
 
 from app.config import Settings
-from app.vpn import (
-    ADD_USER_OPERATION,
-    MockVpnBackend,
-    REMOVE_USER_OPERATION,
-    XrayBackend,
-    add_user_operation_value,
-    alter_inbound_payload,
-    remove_user_operation_value,
-)
+from app.vpn import MockVpnBackend, XrayBackend
+
+
+def xray_config() -> dict:
+    return {
+        "inbounds": [
+            {
+                "tag": "vless-reality",
+                "protocol": "vless",
+                "settings": {"clients": [], "decryption": "none"},
+            }
+        ]
+    }
 
 
 async def test_mock_profile_contains_vless_reality_parameters():
@@ -20,52 +25,88 @@ async def test_mock_profile_contains_vless_reality_parameters():
     )
     profile = await MockVpnBackend(settings).create_peer("device@test", "Phone")
     assert profile.uri.startswith("vless://")
-    assert "@vpn.example.com:443?" in profile.uri
+    assert "@vpn.example.com:8443?" in profile.uri
     assert "security=reality" in profile.uri
     assert "flow=xtls-rprx-vision" in profile.uri
     assert "pbk=public-key" in profile.uri
+    assert "sni=www.microsoft.com" in profile.uri
 
 
-def test_add_user_payload_uses_xray_typed_message_fields():
-    value = add_user_operation_value("11111111-1111-1111-1111-111111111111", "device@test")
-    payload = alter_inbound_payload("vless-reality", ADD_USER_OPERATION, value)
+async def test_activate_peer_adds_client_and_restarts_xray(tmp_path):
+    config_path = tmp_path / "config.json"
+    config_path.write_text(json.dumps(xray_config()))
+    backend = XrayBackend(Settings(xray_config_path=str(config_path)))
+    restarts = []
 
-    assert payload == {
-        "tag": "vless-reality",
-        "operation": {
-            "type": "xray.app.proxyman.command.AddUserOperation",
-            "value": value,
-        },
-    }
-    assert "@type" not in payload["operation"]
-    assert "user" not in payload["operation"]
-    decoded = base64.b64decode(value)
-    assert b"11111111-1111-1111-1111-111111111111" in decoded
-    assert b"device@test" in decoded
-    assert b"xray.proxy.vless.Account" in decoded
-    assert b"xtls-rprx-vision" in decoded
+    async def restart():
+        restarts.append(True)
 
-
-def test_remove_user_payload_uses_xray_typed_message_fields():
-    value = remove_user_operation_value("device@test")
-    payload = alter_inbound_payload("vless-reality", REMOVE_USER_OPERATION, value)
-
-    assert payload["operation"]["type"] == "xray.app.proxyman.command.RemoveUserOperation"
-    assert base64.b64decode(payload["operation"]["value"]) == b"\x0a\x0bdevice@test"
-
-
-async def test_xray_backend_sends_typed_message_payloads():
-    backend = XrayBackend(Settings(xray_inbound_tag="test-inbound"))
-    calls = []
-
-    async def capture(method, payload):
-        calls.append((method, payload))
-        return {}
-
-    backend._grpc = capture
+    backend._restart_xray = restart
     await backend.activate_peer("11111111-1111-1111-1111-111111111111", "device@test")
+
+    clients = json.loads(config_path.read_text())["inbounds"][0]["settings"]["clients"]
+    assert clients == [
+        {
+            "id": "11111111-1111-1111-1111-111111111111",
+            "email": "device@test",
+            "flow": "xtls-rprx-vision",
+        }
+    ]
+    assert restarts == [True]
+
+    await backend.activate_peer("11111111-1111-1111-1111-111111111111", "device@test")
+    assert restarts == [True]
+
+
+async def test_revoke_peer_removes_client_and_restarts_xray(tmp_path):
+    config = xray_config()
+    config["inbounds"][0]["settings"]["clients"].append(
+        {
+            "id": "11111111-1111-1111-1111-111111111111",
+            "email": "device@test",
+            "flow": "xtls-rprx-vision",
+        }
+    )
+    config_path = tmp_path / "config.json"
+    config_path.write_text(json.dumps(config))
+    backend = XrayBackend(Settings(xray_config_path=str(config_path)))
+    restarts = []
+
+    async def restart():
+        restarts.append(True)
+
+    backend._restart_xray = restart
     await backend.revoke_peer("device@test")
 
-    assert calls[0][1]["operation"]["type"] == ADD_USER_OPERATION
-    assert calls[1][1]["operation"]["type"] == REMOVE_USER_OPERATION
-    assert all(set(payload["operation"]) == {"type", "value"} for _, payload in calls)
+    clients = json.loads(config_path.read_text())["inbounds"][0]["settings"]["clients"]
+    assert clients == []
+    assert restarts == [True]
+
+    await backend.revoke_peer("device@test")
+    assert restarts == [True]
+
+
+async def test_restart_xray_uses_docker_socket(tmp_path):
+    socket_path = tmp_path / "docker.sock"
+    requests = []
+
+    async def handle(reader, writer):
+        requests.append(await reader.readuntil(b"\r\n\r\n"))
+        writer.write(
+            b"HTTP/1.1 204 No Content\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+        )
+        await writer.drain()
+        writer.close()
+
+    server = await asyncio.start_unix_server(handle, path=socket_path)
+    backend = XrayBackend(
+        Settings(docker_socket_path=str(socket_path), xray_container_name="vpn-xray")
+    )
+    try:
+        await backend._restart_xray()
+    finally:
+        server.close()
+        await server.wait_closed()
+
+    assert requests
+    assert requests[0].startswith(b"POST /containers/vpn-xray/restart?t=10 HTTP/1.1\r\n")

@@ -16,8 +16,11 @@ class Settings(BaseSettings):
     vpn_backend: str = "mock"
     xray_api_address: str = "127.0.0.1:10085"
     xray_inbound_tag: str = "vless-reality"
+    xray_config_path: str = "/data/xray/config.json"
+    xray_container_name: str = "vpn-xray"
+    docker_socket_path: str = "/var/run/docker.sock"
     xray_public_host: str = ""
-    xray_public_port: int = 443
+    xray_public_port: int = 8443
     xray_reality_server_name: str = "www.microsoft.com"
     xray_reality_public_key: str = ""
     xray_reality_short_id: str = ""
