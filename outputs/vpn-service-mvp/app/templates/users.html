@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+{% block title %}Пользователи — VPN Admin{% endblock %}
+{% block content %}
+<h1>Пользователи</h1>
+<form><input name="q" value="{{ q }}" placeholder="Имя или username"><button>Найти</button></form>
+<br>
+<table>
+  <tr><th>Telegram</th><th>Имя</th><th>Устройства</th><th>Подписка до</th></tr>
+  {% for user in users %}
+  <tr>
+    <td><a href="/admin/users/{{ user.id }}">@{{ user.username or user.telegram_id }}</a></td>
+    <td>{{ user.full_name }}</td>
+    <td>{{ user.devices | rejectattr("is_revoked") | list | length }}</td>
+    <td>{{ user.subscription_ends_at.strftime("%d.%m.%Y") if user.subscription_ends_at else "—" }}</td>
+  </tr>
+  {% endfor %}
+</table>
+{% endblock %}
+

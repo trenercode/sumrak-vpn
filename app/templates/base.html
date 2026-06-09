@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}VPN Admin{% endblock %}</title>
+  <style>
+    :root { color-scheme: dark; font-family: Inter, system-ui, sans-serif; }
+    body { margin: 0; background: #0b1020; color: #e8ecf5; }
+    nav { padding: 18px 28px; background: #111831; display: flex; gap: 22px; }
+    nav a, a { color: #8eb5ff; text-decoration: none; }
+    main { max-width: 1100px; margin: 32px auto; padding: 0 20px; }
+    .cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+    .card, table { background: #151d38; border: 1px solid #263254; border-radius: 12px; }
+    .card { padding: 22px; }
+    .value { font-size: 34px; font-weight: 700; margin-top: 8px; }
+    table { width: 100%; border-collapse: collapse; overflow: hidden; }
+    th, td { padding: 13px; text-align: left; border-bottom: 1px solid #263254; }
+    input, button { padding: 9px 12px; border-radius: 8px; border: 1px solid #344368; }
+    input { background: #0e152a; color: white; }
+    button { background: #3c71dd; color: white; cursor: pointer; }
+    button.danger { background: #9d3943; }
+    .inline { display: inline-flex; gap: 8px; }
+    .muted { color: #9da8c4; }
+    @media (max-width: 700px) { .cards { grid-template-columns: 1fr; } }
+  </style>
+</head>
+<body>
+  <nav><strong>VPN Admin</strong><a href="/admin">Обзор</a><a href="/admin/users">Пользователи</a></nav>
+  <main>{% block content %}{% endblock %}</main>
+</body>
+</html>
+

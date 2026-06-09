@@ -1,0 +1,34 @@
+{% extends "base.html" %}
+{% block title %}{{ user.full_name }} — VPN Admin{% endblock %}
+{% block content %}
+<h1>{{ user.full_name }}</h1>
+<p class="muted">@{{ user.username or "—" }} · Telegram ID {{ user.telegram_id }}</p>
+<p>Пробный период до: {{ user.trial_ends_at.strftime("%d.%m.%Y %H:%M") if user.trial_ends_at else "не начат" }}</p>
+<p>Подписка до: {{ user.subscription_ends_at.strftime("%d.%m.%Y %H:%M") if user.subscription_ends_at else "нет" }}</p>
+<form class="inline" method="post" action="/admin/users/{{ user.id }}/grant">
+  <input type="number" name="days" min="1" max="3650" value="30">
+  <button>Выдать дни</button>
+</form>
+<form class="inline" method="post" action="/admin/users/{{ user.id }}/toggle-block">
+  <button class="danger">{{ "Разблокировать" if user.is_blocked else "Заблокировать" }}</button>
+</form>
+<h2>Устройства</h2>
+<table>
+  <tr><th>Название</th><th>IP</th><th>Последнее подключение</th><th>Трафик</th><th>Статус</th><th></th></tr>
+  {% for device in user.devices %}
+  <tr>
+    <td>{{ device.name }}</td><td>{{ device.assigned_ip }}</td>
+    <td>{{ device.last_handshake_at.strftime("%d.%m.%Y %H:%M") if device.last_handshake_at else "—" }}</td>
+    <td>{{ ((device.transfer_rx + device.transfer_tx) / 1048576) | round(1) }} МБ</td>
+    <td>{{ "отозван" if device.is_revoked else "активен" }}</td>
+    <td>
+      {% if not device.is_revoked %}
+      <form method="post" action="/admin/devices/{{ device.id }}/revoke">
+        <button class="danger">Отозвать</button>
+      </form>
+      {% endif %}
+    </td>
+  </tr>
+  {% endfor %}
+</table>
+{% endblock %}
