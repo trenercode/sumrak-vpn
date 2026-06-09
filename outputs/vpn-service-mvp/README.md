@@ -85,6 +85,38 @@ docker compose logs -f xray bot
 В firewall должен быть открыт `TCP/443`. Не открывайте наружу Xray API `10085`,
 PostgreSQL или админку без HTTPS и ограничения доступа.
 
+## Проверка Xray API через grpcurl
+
+Xray использует собственный `xray.common.serial.TypedMessage`, а не
+`google.protobuf.Any`. Поэтому `AlterInboundRequest.operation` должен содержать поля
+`type` и `value`, где `value` — base64-сериализованный protobuf операции.
+
+Проверить доступность API и схему:
+
+```bash
+docker compose exec bot grpcurl -plaintext \
+  127.0.0.1:10085 \
+  describe xray.app.proxyman.command.HandlerService.AlterInbound
+```
+
+Добавить тестового VLESS-пользователя:
+
+```bash
+docker compose exec -T bot python -c \
+  'import json; from app.vpn import ADD_USER_OPERATION,add_user_operation_value,alter_inbound_payload; print(json.dumps(alter_inbound_payload("vless-reality",ADD_USER_OPERATION,add_user_operation_value("11111111-1111-1111-1111-111111111111","grpcurl-test@vpn.local"))))' \
+| docker compose exec -T bot grpcurl -plaintext -d @ \
+  127.0.0.1:10085 xray.app.proxyman.command.HandlerService/AlterInbound
+```
+
+Удалить тестового пользователя:
+
+```bash
+docker compose exec -T bot python -c \
+  'import json; from app.vpn import REMOVE_USER_OPERATION,remove_user_operation_value,alter_inbound_payload; print(json.dumps(alter_inbound_payload("vless-reality",REMOVE_USER_OPERATION,remove_user_operation_value("grpcurl-test@vpn.local"))))' \
+| docker compose exec -T bot grpcurl -plaintext -d @ \
+  127.0.0.1:10085 xray.app.proxyman.command.HandlerService/AlterInbound
+```
+
 ## Выбор REALITY target
 
 По умолчанию используется `www.microsoft.com:443`. Перед эксплуатацией target нужно
