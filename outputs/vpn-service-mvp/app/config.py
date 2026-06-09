@@ -14,16 +14,16 @@ class Settings(BaseSettings):
     max_devices: int = 10
 
     vpn_backend: str = "mock"
-    wg_interface: str = "wg0"
-    wg_server_public_key: str = ""
-    wg_endpoint: str = "vpn.example.com:51820"
-    wg_network: str = "10.66.0.0/24"
-    wg_server_address: str = "10.66.0.1"
-    wg_dns: str = "1.1.1.1,1.0.0.1"
-    wg_persistent_keepalive: int = 25
+    xray_api_address: str = "127.0.0.1:10085"
+    xray_inbound_tag: str = "vless-reality"
+    xray_public_host: str = ""
+    xray_public_port: int = 443
+    xray_reality_server_name: str = "www.microsoft.com"
+    xray_reality_public_key: str = ""
+    xray_reality_short_id: str = ""
+    xray_fingerprint: str = "chrome"
 
 
 @lru_cache
 def get_settings() -> Settings:
     return Settings()
-

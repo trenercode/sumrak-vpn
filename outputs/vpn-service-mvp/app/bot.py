@@ -1,4 +1,5 @@
 import asyncio
+import html
 import logging
 
 from aiogram import Bot, Dispatcher, F, Router
@@ -94,17 +95,17 @@ async def device_create(callback: CallbackQuery):
             await callback.message.answer(str(error), reply_markup=main_keyboard())
             return
 
-    document = BufferedInputFile(
-        profile.config.encode(), filename=f"vpn-{device.id[:8]}.conf"
-    )
+    document = BufferedInputFile(profile.uri.encode(), filename=f"vpn-{device.id[:8]}.txt")
     await callback.message.answer_document(
         document,
         caption=(
-            f"Профиль для «{device.name}». Импортируйте файл в WireGuard-клиент.\n\n"
-            "Файл содержит приватный ключ и повторно не выдается."
+            f"Профиль VLESS Reality для «{device.name}».\n\n"
+            "Скопируйте ссылку из файла и импортируйте ее в Hiddify, v2rayN, "
+            "Nekoray или другой Reality-совместимый клиент."
         ),
         reply_markup=main_keyboard(),
     )
+    await callback.message.answer(f"<code>{html.escape(profile.uri)}</code>", parse_mode="HTML")
 
 
 @router.callback_query(F.data == "device:list")
@@ -126,7 +127,7 @@ async def device_list(callback: CallbackQuery):
     for device in devices:
         keyboard.button(text=f"Отозвать: {device.name}", callback_data=f"device:revoke:{device.id}")
     keyboard.adjust(1)
-    text = "\n".join(f"• {device.name} — {device.assigned_ip}" for device in devices)
+    text = "\n".join(f"• {device.name}" for device in devices)
     await callback.message.answer(text, reply_markup=keyboard.as_markup())
 
 

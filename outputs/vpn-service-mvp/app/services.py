@@ -6,7 +6,7 @@ from sqlalchemy.orm import selectinload
 
 from app.config import Settings
 from app.models import Device, User
-from app.vpn import PeerProfile, VpnBackend, next_available_ip
+from app.vpn import PeerProfile, VpnBackend, new_client_email
 
 
 def now() -> datetime:
@@ -73,20 +73,19 @@ async def create_device(
     if len(active_devices) >= settings.max_devices:
         raise ValueError(f"Достигнут лимит: {settings.max_devices} устройств")
 
-    used_ips = set(await session.scalars(select(Device.assigned_ip)))
-    assigned_ip = next_available_ip(settings.wg_network, settings.wg_server_address, used_ips)
-    profile = await vpn.create_peer(assigned_ip)
+    client_email = new_client_email()
+    profile = await vpn.create_peer(client_email, name)
     device = Device(
         user_id=user.id,
         name=name[:80],
-        public_key=profile.public_key,
-        assigned_ip=profile.assigned_ip,
+        credential=profile.credential,
+        client_email=profile.client_email,
     )
     session.add(device)
     try:
         await session.commit()
     except Exception:
-        await vpn.revoke_peer(profile.public_key)
+        await vpn.revoke_peer(profile.client_email)
         raise
     await session.refresh(device)
     return device, profile
@@ -95,7 +94,7 @@ async def create_device(
 async def revoke_device(session: AsyncSession, device: Device, vpn: VpnBackend) -> None:
     if device.is_revoked:
         return
-    await vpn.revoke_peer(device.public_key)
+    await vpn.revoke_peer(device.client_email)
     device.is_revoked = True
     device.revoked_at = now()
     await session.commit()
@@ -110,16 +109,17 @@ async def reconcile_vpn(session: AsyncSession, vpn: VpnBackend) -> None:
             if device.is_revoked:
                 continue
             if has_access(user):
-                await vpn.activate_peer(device.public_key, device.assigned_ip)
+                await vpn.activate_peer(device.credential, device.client_email)
             else:
-                await vpn.revoke_peer(device.public_key)
+                await vpn.revoke_peer(device.client_email)
                 device.is_revoked = True
                 device.revoked_at = now()
     stats = await vpn.peer_stats()
     for device in await session.scalars(select(Device).where(Device.is_revoked.is_(False))):
-        peer = stats.get(device.public_key)
+        peer = stats.get(device.client_email)
         if peer:
-            device.last_handshake_at = peer.last_handshake_at
+            if peer.transfer_rx != device.transfer_rx or peer.transfer_tx != device.transfer_tx:
+                device.last_activity_at = now()
             device.transfer_rx = peer.transfer_rx
             device.transfer_tx = peer.transfer_tx
     await session.commit()

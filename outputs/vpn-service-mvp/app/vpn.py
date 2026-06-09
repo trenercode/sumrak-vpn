@@ -1,24 +1,24 @@
 import asyncio
-import base64
-import hashlib
-import ipaddress
+import json
 import secrets
+import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from urllib.parse import quote, urlencode
 
 from app.config import Settings
 
 
 @dataclass(frozen=True)
 class PeerProfile:
-    public_key: str
-    assigned_ip: str
-    config: str
+    credential: str
+    client_email: str
+    uri: str
 
 
 @dataclass(frozen=True)
 class PeerStats:
-    last_handshake_at: datetime | None
+    last_activity_at: datetime | None
     transfer_rx: int
     transfer_tx: int
 
@@ -27,120 +27,147 @@ class VpnBackend:
     def __init__(self, settings: Settings):
         self.settings = settings
 
-    async def create_peer(self, assigned_ip: str) -> PeerProfile:
+    async def create_peer(self, client_email: str, label: str) -> PeerProfile:
         raise NotImplementedError
 
-    async def revoke_peer(self, public_key: str) -> None:
+    async def revoke_peer(self, client_email: str) -> None:
         raise NotImplementedError
 
-    async def activate_peer(self, public_key: str, assigned_ip: str) -> None:
+    async def activate_peer(self, credential: str, client_email: str) -> None:
         raise NotImplementedError
 
     async def peer_stats(self) -> dict[str, PeerStats]:
         raise NotImplementedError
 
-    def render_config(self, private_key: str, assigned_ip: str) -> str:
+    def render_uri(self, credential: str, label: str) -> str:
         s = self.settings
+        query = urlencode(
+            {
+                "encryption": "none",
+                "flow": "xtls-rprx-vision",
+                "security": "reality",
+                "sni": s.xray_reality_server_name,
+                "fp": s.xray_fingerprint,
+                "pbk": s.xray_reality_public_key,
+                "sid": s.xray_reality_short_id,
+                "type": "tcp",
+                "headerType": "none",
+            }
+        )
         return (
-            "[Interface]\n"
-            f"PrivateKey = {private_key}\n"
-            f"Address = {assigned_ip}/32\n"
-            f"DNS = {s.wg_dns}\n\n"
-            "[Peer]\n"
-            f"PublicKey = {s.wg_server_public_key}\n"
-            "AllowedIPs = 0.0.0.0/0\n"
-            f"Endpoint = {s.wg_endpoint}\n"
-            f"PersistentKeepalive = {s.wg_persistent_keepalive}\n"
+            f"vless://{credential}@{s.xray_public_host}:{s.xray_public_port}"
+            f"?{query}#{quote(label)}"
         )
 
 
 class MockVpnBackend(VpnBackend):
-    async def create_peer(self, assigned_ip: str) -> PeerProfile:
-        private_key = base64.b64encode(secrets.token_bytes(32)).decode()
-        public_key = base64.b64encode(hashlib.sha256(private_key.encode()).digest()).decode()
-        return PeerProfile(public_key, assigned_ip, self.render_config(private_key, assigned_ip))
+    async def create_peer(self, client_email: str, label: str) -> PeerProfile:
+        credential = str(uuid.uuid4())
+        return PeerProfile(credential, client_email, self.render_uri(credential, label))
 
-    async def revoke_peer(self, public_key: str) -> None:
+    async def revoke_peer(self, client_email: str) -> None:
         return None
 
-    async def activate_peer(self, public_key: str, assigned_ip: str) -> None:
+    async def activate_peer(self, credential: str, client_email: str) -> None:
         return None
 
     async def peer_stats(self) -> dict[str, PeerStats]:
         return {}
 
 
-class WireGuardBackend(VpnBackend):
-    async def _run(self, *args: str, stdin: str | None = None) -> str:
+class XrayBackend(VpnBackend):
+    async def _grpc(self, method: str, payload: dict) -> dict:
         process = await asyncio.create_subprocess_exec(
-            *args,
-            stdin=asyncio.subprocess.PIPE if stdin is not None else None,
+            "grpcurl",
+            "-plaintext",
+            "-d",
+            json.dumps(payload),
+            self.settings.xray_api_address,
+            method,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
-        stdout, stderr = await process.communicate(stdin.encode() if stdin is not None else None)
+        stdout, stderr = await process.communicate()
         if process.returncode:
-            raise RuntimeError(f"{' '.join(args)} failed: {stderr.decode().strip()}")
-        return stdout.decode().strip()
+            error = stderr.decode().strip()
+            if "already exists" in error.lower() or "not found" in error.lower():
+                return {}
+            raise RuntimeError(f"Xray API failed: {error}")
+        output = stdout.decode().strip()
+        return json.loads(output) if output else {}
 
-    async def create_peer(self, assigned_ip: str) -> PeerProfile:
-        private_key = await self._run("wg", "genkey")
-        public_key = await self._run("wg", "pubkey", stdin=private_key)
-        await self._run(
-            "wg",
-            "set",
-            self.settings.wg_interface,
-            "peer",
-            public_key,
-            "allowed-ips",
-            f"{assigned_ip}/32",
+    async def create_peer(self, client_email: str, label: str) -> PeerProfile:
+        credential = str(uuid.uuid4())
+        await self.activate_peer(credential, client_email)
+        return PeerProfile(credential, client_email, self.render_uri(credential, label))
+
+    async def activate_peer(self, credential: str, client_email: str) -> None:
+        await self._grpc(
+            "xray.app.proxyman.command.HandlerService/AlterInbound",
+            {
+                "tag": self.settings.xray_inbound_tag,
+                "operation": {
+                    "@type": "type.googleapis.com/xray.app.proxyman.command.AddUserOperation",
+                    "user": {
+                        "level": 0,
+                        "email": client_email,
+                        "account": {
+                            "@type": "type.googleapis.com/xray.proxy.vless.Account",
+                            "id": credential,
+                            "flow": "xtls-rprx-vision",
+                        },
+                    },
+                },
+            },
         )
-        return PeerProfile(public_key, assigned_ip, self.render_config(private_key, assigned_ip))
 
-    async def revoke_peer(self, public_key: str) -> None:
-        await self._run(
-            "wg", "set", self.settings.wg_interface, "peer", public_key, "remove"
-        )
-
-    async def activate_peer(self, public_key: str, assigned_ip: str) -> None:
-        await self._run(
-            "wg",
-            "set",
-            self.settings.wg_interface,
-            "peer",
-            public_key,
-            "allowed-ips",
-            f"{assigned_ip}/32",
+    async def revoke_peer(self, client_email: str) -> None:
+        await self._grpc(
+            "xray.app.proxyman.command.HandlerService/AlterInbound",
+            {
+                "tag": self.settings.xray_inbound_tag,
+                "operation": {
+                    "@type": "type.googleapis.com/xray.app.proxyman.command.RemoveUserOperation",
+                    "email": client_email,
+                },
+            },
         )
 
     async def peer_stats(self) -> dict[str, PeerStats]:
-        output = await self._run("wg", "show", self.settings.wg_interface, "dump")
+        response = await self._grpc(
+            "xray.app.stats.command.StatsService/QueryStats",
+            {"pattern": "user>>>", "reset": False},
+        )
         result: dict[str, PeerStats] = {}
-        for line in output.splitlines()[1:]:
-            fields = line.split("\t")
-            if len(fields) < 8:
+        for item in response.get("stat", []):
+            parts = item.get("name", "").split(">>>")
+            if len(parts) != 4 or parts[0] != "user" or parts[2] != "traffic":
                 continue
-            timestamp = int(fields[4])
-            result[fields[0]] = PeerStats(
-                datetime.fromtimestamp(timestamp, UTC) if timestamp else None,
-                int(fields[5]),
-                int(fields[6]),
+            email, direction = parts[1], parts[3]
+            previous = result.get(email, PeerStats(None, 0, 0))
+            value = int(item.get("value", 0))
+            active_at = datetime.now(UTC) if value else previous.last_activity_at
+            result[email] = PeerStats(
+                active_at,
+                value if direction == "downlink" else previous.transfer_rx,
+                value if direction == "uplink" else previous.transfer_tx,
             )
         return result
 
 
 def build_vpn_backend(settings: Settings) -> VpnBackend:
-    if settings.vpn_backend == "wireguard":
-        if not settings.wg_server_public_key:
-            raise ValueError("WG_SERVER_PUBLIC_KEY is required for wireguard backend")
-        return WireGuardBackend(settings)
+    if settings.vpn_backend == "xray":
+        required = {
+            "XRAY_PUBLIC_HOST": settings.xray_public_host,
+            "XRAY_REALITY_PUBLIC_KEY": settings.xray_reality_public_key,
+            "XRAY_REALITY_SHORT_ID": settings.xray_reality_short_id,
+        }
+        missing = [name for name, value in required.items() if not value]
+        if missing:
+            raise ValueError(f"Missing Xray settings: {', '.join(missing)}")
+        return XrayBackend(settings)
     return MockVpnBackend(settings)
 
 
-def next_available_ip(network: str, server_address: str, used_ips: set[str]) -> str:
-    subnet = ipaddress.ip_network(network)
-    for address in subnet.hosts():
-        candidate = str(address)
-        if candidate != server_address and candidate not in used_ips:
-            return candidate
-    raise RuntimeError("VPN address pool is exhausted")
+def new_client_email() -> str:
+    return f"device-{secrets.token_hex(12)}@vpn.local"

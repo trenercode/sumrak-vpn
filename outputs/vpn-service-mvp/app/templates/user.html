@@ -14,11 +14,11 @@
 </form>
 <h2>Устройства</h2>
 <table>
-  <tr><th>Название</th><th>IP</th><th>Последнее подключение</th><th>Трафик</th><th>Статус</th><th></th></tr>
+  <tr><th>Название</th><th>ID статистики</th><th>Последняя активность</th><th>Трафик</th><th>Статус</th><th></th></tr>
   {% for device in user.devices %}
   <tr>
-    <td>{{ device.name }}</td><td>{{ device.assigned_ip }}</td>
-    <td>{{ device.last_handshake_at.strftime("%d.%m.%Y %H:%M") if device.last_handshake_at else "—" }}</td>
+    <td>{{ device.name }}</td><td>{{ device.client_email }}</td>
+    <td>{{ device.last_activity_at.strftime("%d.%m.%Y %H:%M") if device.last_activity_at else "—" }}</td>
     <td>{{ ((device.transfer_rx + device.transfer_tx) / 1048576) | round(1) }} МБ</td>
     <td>{{ "отозван" if device.is_revoked else "активен" }}</td>
     <td>

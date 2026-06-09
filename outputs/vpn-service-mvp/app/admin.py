@@ -59,7 +59,7 @@ async def dashboard(request: Request, session: AsyncSession = Depends(get_sessio
         .select_from(Device)
         .where(
             Device.is_revoked.is_(False),
-            Device.last_handshake_at > now - timedelta(minutes=3),
+            Device.last_activity_at > now - timedelta(minutes=3),
         )
     )
     recent_users = list(await session.scalars(select(User).order_by(User.created_at.desc()).limit(10)))
