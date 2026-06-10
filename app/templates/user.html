@@ -33,6 +33,9 @@
       {% endif %}
     </td>
   </tr>
+  {% if device.server_profiles %}
+  <tr><td colspan="7" class="muted">Серверы: {% for profile in device.server_profiles %}{{ profile.server.name }} — {{ "активен" if profile.is_active else "отозван" }}{% if not loop.last %}, {% endif %}{% endfor %}</td></tr>
+  {% endif %}
   {% endfor %}
 </table>
 {% endblock %}

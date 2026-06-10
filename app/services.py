@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+import uuid
 
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -10,12 +11,20 @@ from app.models import (
     Broadcast,
     BroadcastRecipient,
     Device,
+    DeviceServerProfile,
     NotificationLog,
     ReferralReward,
     User,
     VpnClient,
+    VpnServer,
 )
-from app.vpn import PeerProfile, VpnBackend, new_client_email
+from app.nodes import (
+    NodeManagerRegistry,
+    active_servers,
+    create_server_profile,
+    ensure_default_server,
+)
+from app.vpn import new_client_email
 
 PLATFORM_LABELS = {
     "ios": "iPhone",
@@ -147,8 +156,8 @@ async def create_device(
     user: User,
     platform: str,
     settings: Settings,
-    vpn: VpnBackend,
-) -> tuple[Device, PeerProfile]:
+    nodes: NodeManagerRegistry,
+) -> tuple[Device, list[DeviceServerProfile]]:
     await start_trial(session, user, settings)
     await session.refresh(user)
     if not has_access(user):
@@ -165,54 +174,169 @@ async def create_device(
     platform_count = sum(1 for device in active_devices if device.platform == platform)
     name = f"{PLATFORM_LABELS.get(platform, 'Устройство')} {platform_count + 1}"
     client_email = new_client_email()
-    profile = await vpn.create_peer(client_email, name)
+    credential = str(uuid.uuid4())
     device = Device(
         user_id=user.id,
         name=name,
         platform=platform,
-        credential=profile.credential,
-        client_email=profile.client_email,
+        credential=credential,
+        client_email=client_email,
     )
     session.add(device)
+    await session.flush()
+    profiles: list[DeviceServerProfile] = []
     try:
+        servers = await active_servers(session, settings)
+        if not servers:
+            raise ValueError("no_available_servers")
+        for server in servers:
+            profile = await create_server_profile(
+                session,
+                device.id,
+                server,
+                nodes,
+                credential=credential if server.is_default else None,
+                client_email=client_email if server.is_default else None,
+            )
+            profiles.append(profile)
         await session.commit()
     except Exception:
-        await vpn.revoke_peer(profile.client_email)
+        for profile in profiles:
+            server = await session.get(VpnServer, profile.server_id)
+            if server:
+                await nodes.revoke(server, profile.client_email)
+        await session.rollback()
         raise
     await session.refresh(device)
-    return device, profile
+    return device, profiles
 
 
-async def revoke_device(session: AsyncSession, device: Device, vpn: VpnBackend) -> None:
+async def ensure_device_profiles(
+    session: AsyncSession, device: Device, settings: Settings, nodes: NodeManagerRegistry
+) -> list[DeviceServerProfile]:
+    profiles = list(
+        await session.scalars(
+            select(DeviceServerProfile).where(DeviceServerProfile.device_id == device.id)
+        )
+    )
+    existing_server_ids = {profile.server_id for profile in profiles}
+    default_server = await ensure_default_server(session, settings)
+    for server in await active_servers(session, settings):
+        if server.id in existing_server_ids:
+            continue
+        profile = await create_server_profile(
+            session,
+            device.id,
+            server,
+            nodes,
+            credential=device.credential if server.id == default_server.id else None,
+            client_email=device.client_email if server.id == default_server.id else None,
+        )
+        profiles.append(profile)
+    await session.commit()
+    return profiles
+
+
+async def revoke_device(
+    session: AsyncSession, device: Device, settings: Settings, nodes: NodeManagerRegistry
+) -> None:
     if device.is_revoked:
         return
-    await vpn.revoke_peer(device.client_email)
+    profiles = await ensure_device_profiles(session, device, settings, nodes)
+    for profile in profiles:
+        if not profile.is_active:
+            continue
+        server = await session.get(VpnServer, profile.server_id)
+        if server:
+            await nodes.revoke(server, profile.client_email)
+        profile.is_active = False
+        profile.revoked_at = now()
     device.is_revoked = True
     device.revoked_at = now()
     await session.commit()
 
 
-async def reconcile_vpn(session: AsyncSession, vpn: VpnBackend) -> None:
+async def reconcile_vpn(
+    session: AsyncSession, settings: Settings, nodes: NodeManagerRegistry
+) -> None:
     users = list(await session.scalars(select(User).options(selectinload(User.devices))))
     for user in users:
         for device in user.devices:
             if device.is_revoked:
                 continue
+            profiles = await ensure_device_profiles(session, device, settings, nodes)
             if has_access(user):
-                await vpn.activate_peer(device.credential, device.client_email)
+                for profile in profiles:
+                    server = await session.get(VpnServer, profile.server_id)
+                    if server and server.is_active and profile.is_active:
+                        await nodes.activate(server, profile.credential, profile.client_email)
             else:
-                await vpn.revoke_peer(device.client_email)
+                for profile in profiles:
+                    server = await session.get(VpnServer, profile.server_id)
+                    if server and profile.is_active:
+                        await nodes.revoke(server, profile.client_email)
+                    profile.is_active = False
+                    profile.revoked_at = now()
                 device.is_revoked = True
                 device.revoked_at = now()
-    stats = await vpn.peer_stats()
-    for device in await session.scalars(select(Device).where(Device.is_revoked.is_(False))):
-        peer = stats.get(device.client_email)
-        if peer:
-            if peer.transfer_rx != device.transfer_rx or peer.transfer_tx != device.transfer_tx:
-                device.last_activity_at = now()
-            device.transfer_rx = peer.transfer_rx
-            device.transfer_tx = peer.transfer_tx
+    servers = list(await session.scalars(select(VpnServer).where(VpnServer.is_active.is_(True))))
+    for server in servers:
+        try:
+            stats = await nodes.stats(server)
+        except Exception:
+            continue
+        profiles = list(
+            await session.scalars(
+                select(DeviceServerProfile).where(
+                    DeviceServerProfile.server_id == server.id,
+                    DeviceServerProfile.is_active.is_(True),
+                )
+            )
+        )
+        for profile in profiles:
+            peer = stats.get(profile.client_email)
+            if peer:
+                profile.last_activity_at = peer.last_activity_at or profile.last_activity_at
+                profile.transfer_rx = peer.transfer_rx
+                profile.transfer_tx = peer.transfer_tx
+    active_devices = list(
+        await session.scalars(select(Device).where(Device.is_revoked.is_(False)))
+    )
+    for device in active_devices:
+        profiles = list(
+            await session.scalars(
+                select(DeviceServerProfile).where(DeviceServerProfile.device_id == device.id)
+            )
+        )
+        device.transfer_rx = sum(profile.transfer_rx for profile in profiles)
+        device.transfer_tx = sum(profile.transfer_tx for profile in profiles)
+        activities = [profile.last_activity_at for profile in profiles if profile.last_activity_at]
+        device.last_activity_at = max(activities) if activities else device.last_activity_at
     await session.commit()
+
+
+async def subscription_uris(
+    session: AsyncSession, device: Device, settings: Settings, nodes: NodeManagerRegistry
+) -> list[str]:
+    if device.is_revoked:
+        return []
+    user = await session.get(User, device.user_id)
+    if user is None or not has_access(user):
+        return []
+    await ensure_device_profiles(session, device, settings, nodes)
+    profiles = list(
+        await session.scalars(
+            select(DeviceServerProfile)
+            .join(VpnServer)
+            .where(
+                DeviceServerProfile.device_id == device.id,
+                DeviceServerProfile.is_active.is_(True),
+                VpnServer.is_active.is_(True),
+            )
+            .order_by(VpnServer.priority, VpnServer.name)
+        )
+    )
+    return [profile.uri for profile in profiles]
 
 
 async def referral_stats(session: AsyncSession, user: User) -> dict:
@@ -356,5 +480,11 @@ async def prepare_broadcast(session: AsyncSession, broadcast: Broadcast) -> int:
 
 async def load_user_with_devices(session: AsyncSession, user_id: str) -> User | None:
     return await session.scalar(
-        select(User).options(selectinload(User.devices)).where(User.id == user_id)
+        select(User)
+        .options(
+            selectinload(User.devices)
+            .selectinload(Device.server_profiles)
+            .selectinload(DeviceServerProfile.server)
+        )
+        .where(User.id == user_id)
     )

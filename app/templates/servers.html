@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+{% block title %}VPN-серверы — Sumrak VPN{% endblock %}
+{% block content %}
+<h1>VPN-серверы</h1>
+<div class="card">
+  <h2>Добавить сервер</h2>
+  <form method="post" action="/admin/servers">
+    <p><input name="name" placeholder="Название" required>
+    <input name="country_code" placeholder="Код страны, DE">
+    <input name="country_name" placeholder="Страна">
+    <input name="city" placeholder="Город"></p>
+    <p><input name="host" placeholder="Внутренний host/IP">
+    <input name="public_host" placeholder="Public host/IP" required>
+    <input type="number" name="public_port" value="8443"></p>
+    <p><input name="reality_public_key" placeholder="Reality public key" required>
+    <input name="reality_short_id" placeholder="shortId" required>
+    <input name="reality_server_name" value="www.microsoft.com"></p>
+    <p><input name="fingerprint" value="chrome">
+    <input name="flow" value="xtls-rprx-vision">
+    <select name="transport"><option>raw</option><option>tcp</option><option>xhttp</option></select></p>
+    <p><select name="management_mode"><option>manual</option><option>local_config</option><option>ssh_future</option><option>agent_future</option></select>
+    <input name="xray_config_path" placeholder="/data/xray/config.json">
+    <input type="number" name="priority" value="100">
+    <input type="number" name="max_devices" placeholder="Лимит устройств"></p>
+    <button>Добавить сервер</button>
+  </form>
+</div>
+<h2>Список серверов</h2>
+<table>
+  <tr><th>Сервер</th><th>Режим</th><th>Приоритет</th><th>Устройства</th><th>Health</th><th>Статус</th></tr>
+  {% for server in servers %}
+  <tr>
+    <td><a href="/admin/servers/{{ server.id }}">{{ server.name }}</a><br><span class="muted">{{ server.country_name }} {{ server.city }} · {{ server.public_host }}:{{ server.public_port }}</span></td>
+    <td>{{ server.management_mode }}</td><td>{{ server.priority }}</td>
+    <td>{{ server.current_devices or 0 }}{% if server.max_devices %}/{{ server.max_devices }}{% endif %}</td>
+    <td>{{ server.health_status }}</td>
+    <td>{{ "default · " if server.is_default else "" }}{{ "активен" if server.is_active else "выключен" }}</td>
+  </tr>
+  {% endfor %}
+</table>
+{% endblock %}

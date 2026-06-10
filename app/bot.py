@@ -12,7 +12,16 @@ from sqlalchemy.orm import selectinload
 
 from app.config import get_settings
 from app.db import SessionLocal, engine
-from app.models import Base, BroadcastRecipient, Device, User, VpnClient
+from app.models import (
+    Base,
+    BroadcastRecipient,
+    Device,
+    DeviceServerProfile,
+    User,
+    VpnClient,
+    VpnServer,
+)
+from app.nodes import NodeManagerRegistry, check_server_health, server_label
 from app.services import (
     access_until,
     active_vpn_clients,
@@ -25,10 +34,9 @@ from app.services import (
     revoke_device,
     subscription_status,
 )
-from app.vpn import build_vpn_backend
 
 settings = get_settings()
-vpn = build_vpn_backend(settings)
+nodes = NodeManagerRegistry(settings)
 router = Router()
 
 START_TEXT = """Добро пожаловать в Sumrak VPN 🌑
@@ -88,8 +96,12 @@ def platform_keyboard(prefix: str):
     return keyboard.as_markup()
 
 
-def profile_keyboard():
+def profile_keyboard(device_id: str | None = None):
     keyboard = InlineKeyboardBuilder()
+    if device_id:
+        keyboard.button(
+            text="📋 Получить ссылку подписки", callback_data=f"device:subscription:{device_id}"
+        )
     keyboard.button(text="📱 Инструкция для iOS", callback_data="help:platform:ios")
     keyboard.button(text="🤖 Инструкция для Android", callback_data="help:platform:android")
     keyboard.button(
@@ -212,7 +224,7 @@ async def device_create(callback: CallbackQuery):
     async with SessionLocal() as session:
         user = await session.get(User, user.id)
         try:
-            device, profile = await create_device(session, user, platform, settings, vpn)
+            device, _profiles = await create_device(session, user, platform, settings, nodes)
         except ValueError as error:
             if str(error) == "inactive_subscription":
                 text = "Подписка не активна. Чтобы получить VPN-профиль, продлите доступ."
@@ -221,6 +233,8 @@ async def device_create(callback: CallbackQuery):
                     "Вы уже подключили максимум устройств. Удалите старое устройство "
                     "в разделе «Мои устройства»."
                 )
+            elif str(error) == "no_available_servers":
+                text = "Сейчас нет доступных VPN-серверов. Напишите в поддержку."
             else:
                 text = "Что-то пошло не так. Если нужно срочно — напишите в поддержку."
             await callback.message.answer(text, reply_markup=support_keyboard())
@@ -234,14 +248,16 @@ async def device_create(callback: CallbackQuery):
             )
             return
 
+    subscription_url = f"{settings.panel_public_url.rstrip('/')}/sub/{device.subscription_token}"
     text = (
         "Ваш VPN-профиль готов ✅\n\n"
-        "Скопируйте ссылку ниже и импортируйте её в приложение "
-        "Hiddify / Streisand / Nekoray.\n"
-        "Никому не передавайте эту ссылку — она даёт доступ к вашему VPN.\n\n"
-        f"<code>{html.escape(profile.uri)}</code>"
+        "Добавьте ссылку подписки в приложение Hiddify/Streisand.\n"
+        "Внутри приложения вы увидите доступные страны и сможете переключаться между ними.\n\n"
+        f"<code>{html.escape(subscription_url)}</code>"
     )
-    await callback.message.answer(text, parse_mode="HTML", reply_markup=profile_keyboard())
+    await callback.message.answer(
+        text, parse_mode="HTML", reply_markup=profile_keyboard(device.id)
+    )
 
 
 @router.callback_query(F.data == "device:list")
@@ -252,20 +268,36 @@ async def device_list(callback: CallbackQuery):
         devices = list(
             await session.scalars(
                 select(Device)
+                .options(
+                    selectinload(Device.server_profiles).selectinload(
+                        DeviceServerProfile.server
+                    )
+                )
                 .where(Device.user_id == user.id, Device.is_revoked.is_(False))
                 .order_by(Device.created_at)
             )
         )
     keyboard = InlineKeyboardBuilder()
     for device in devices:
-        keyboard.button(text=f"🔗 {device.name}", callback_data=f"device:copy:{device.id}")
+        keyboard.button(
+            text=f"🔄 Обновить подписку: {device.name}",
+            callback_data=f"device:subscription:{device.id}",
+        )
         keyboard.button(text=f"🗑 Удалить {device.name}", callback_data=f"device:revoke:{device.id}")
     keyboard.button(text="➕ Добавить устройство", callback_data="device:create:start")
     keyboard.button(text="📲 Как подключить VPN", callback_data="help:platforms")
     keyboard.button(text="⬅️ Назад", callback_data="menu")
     keyboard.adjust(1)
     text = "📱 Мои устройства\n\n" + (
-        "\n".join(f"• {device.name}" for device in devices)
+        "\n\n".join(
+            f"• {device.name}\n"
+            + "\n".join(
+                f"  {server_label(profile.server)} — "
+                f"{'активен' if profile.is_active and profile.server.is_active else 'недоступен'}"
+                for profile in device.server_profiles
+            )
+            for device in devices
+        )
         if devices
         else "Активных устройств пока нет."
     )
@@ -273,7 +305,8 @@ async def device_list(callback: CallbackQuery):
 
 
 @router.callback_query(F.data.startswith("device:copy:"))
-async def device_copy(callback: CallbackQuery):
+@router.callback_query(F.data.startswith("device:subscription:"))
+async def device_subscription(callback: CallbackQuery):
     device_id = callback.data.rsplit(":", 1)[-1]
     user = await current_user(callback)
     async with SessionLocal() as session:
@@ -281,12 +314,14 @@ async def device_copy(callback: CallbackQuery):
         if not device or device.user_id != user.id or device.is_revoked:
             await callback.answer("Устройство не найдено", show_alert=True)
             return
-    uri = vpn.render_uri(device.credential, device.name)
+    subscription_url = f"{settings.panel_public_url.rstrip('/')}/sub/{device.subscription_token}"
     await callback.answer()
     await callback.message.answer(
-        f"Ссылка для «{html.escape(device.name)}»:\n\n<code>{html.escape(uri)}</code>",
+        f"Ссылка подписки для «{html.escape(device.name)}»:\n\n"
+        f"<code>{html.escape(subscription_url)}</code>\n\n"
+        "Добавьте её как подписку в VPN-клиент и обновляйте список серверов.",
         parse_mode="HTML",
-        reply_markup=profile_keyboard(),
+        reply_markup=profile_keyboard(device.id),
     )
 
 
@@ -299,7 +334,7 @@ async def device_revoke(callback: CallbackQuery):
         if device is None or device.user_id != user.id:
             await callback.answer("Устройство не найдено", show_alert=True)
             return
-        await revoke_device(session, device, vpn)
+        await revoke_device(session, device, settings, nodes)
     await callback.answer("Профиль отозван")
     await callback.message.answer("Устройство отключено.", reply_markup=main_keyboard())
 
@@ -479,10 +514,24 @@ async def reconcile_loop():
     while True:
         try:
             async with SessionLocal() as session:
-                await reconcile_vpn(session, vpn)
+                await reconcile_vpn(session, settings, nodes)
         except Exception:
             logging.exception("VPN reconciliation failed")
         await asyncio.sleep(60)
+
+
+async def health_check_loop():
+    while True:
+        try:
+            async with SessionLocal() as session:
+                servers = list(
+                    await session.scalars(select(VpnServer).where(VpnServer.is_active.is_(True)))
+                )
+                for server in servers:
+                    await check_server_health(session, server, nodes)
+        except Exception:
+            logging.exception("VPN server health check failed")
+        await asyncio.sleep(300)
 
 
 async def main():
@@ -496,6 +545,7 @@ async def main():
     dispatcher.include_router(router)
     tasks = [
         asyncio.create_task(reconcile_loop()),
+        asyncio.create_task(health_check_loop()),
         asyncio.create_task(notification_loop(bot)),
         asyncio.create_task(broadcast_loop(bot)),
     ]

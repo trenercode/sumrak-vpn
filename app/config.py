@@ -10,6 +10,7 @@ class Settings(BaseSettings):
     bot_token: str = ""
     bot_username: str = ""
     support_telegram_url: str = ""
+    panel_public_url: str = "http://127.0.0.1:8000"
     admin_username: str = "admin"
     admin_password: str = "change-me-now"
     trial_days: int = 3
@@ -28,6 +29,11 @@ class Settings(BaseSettings):
     xray_reality_public_key: str = ""
     xray_reality_short_id: str = ""
     xray_fingerprint: str = "chrome"
+    xray_flow: str = "xtls-rprx-vision"
+    default_server_name: str = "Sumrak VPN"
+    default_server_country_code: str = "RU"
+    default_server_country_name: str = "Default"
+    default_server_city: str = ""
 
 
 @lru_cache

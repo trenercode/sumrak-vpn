@@ -5,6 +5,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.config import Settings
 from app.models import Base, Broadcast, BroadcastRecipient, ReferralReward
+from app.nodes import NodeManagerRegistry
 from app.services import (
     create_device,
     get_or_create_user,
@@ -14,7 +15,6 @@ from app.services import (
     record_successful_payment,
     revoke_device,
 )
-from app.vpn import MockVpnBackend
 
 
 async def database():
@@ -53,14 +53,14 @@ async def test_device_creation_and_removal_preserves_vpn_contract():
         xray_reality_public_key="key",
         xray_reality_short_id="0123456789abcdef",
     )
-    vpn = MockVpnBackend(settings)
+    nodes = NodeManagerRegistry(settings)
     async with sessions() as session:
         user = await get_or_create_user(session, 3, "device_user", "Device User")
-        device, profile = await create_device(session, user, "ios", settings, vpn)
+        device, profiles = await create_device(session, user, "ios", settings, nodes)
         assert device.platform == "ios"
         assert device.name == "iPhone 1"
-        assert profile.uri.startswith("vless://")
-        await revoke_device(session, device, vpn)
+        assert profiles[0].uri.startswith("vless://")
+        await revoke_device(session, device, settings, nodes)
         assert device.is_revoked
     await engine.dispose()
 

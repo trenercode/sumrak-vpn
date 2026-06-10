@@ -117,7 +117,7 @@ class XrayBackend(VpnBackend):
                 desired = {
                     "id": credential,
                     "email": client_email,
-                    "flow": "xtls-rprx-vision",
+                    "flow": self.settings.xray_flow,
                 }
                 if existing == desired:
                     return False

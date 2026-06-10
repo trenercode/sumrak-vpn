@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+{% block title %}{{ server.name }} — VPN-сервер{% endblock %}
+{% block content %}
+<h1>{{ server.name }}</h1>
+{% if server.management_mode == "manual" %}
+<div class="card"><strong>Внимание:</strong> Этот сервер добавлен вручную. Убедитесь, что пользователь UUID добавлен в Xray config на этой ноде.</div><br>
+{% endif %}
+<p>Health: {{ server.health_status }} · Последняя проверка: {{ server.last_health_check_at or "—" }} · Устройства: {{ server.current_devices or 0 }}</p>
+<form method="post" action="/admin/servers/{{ server.id }}">
+  <p><input name="name" value="{{ server.name }}" required>
+  <input name="country_code" value="{{ server.country_code }}">
+  <input name="country_name" value="{{ server.country_name }}">
+  <input name="city" value="{{ server.city }}"></p>
+  <p><input name="host" value="{{ server.host }}">
+  <input name="public_host" value="{{ server.public_host }}" required>
+  <input type="number" name="public_port" value="{{ server.public_port }}"></p>
+  <p><input name="reality_public_key" value="{{ server.reality_public_key }}" required>
+  <input name="reality_short_id" value="{{ server.reality_short_id }}" required>
+  <input name="reality_server_name" value="{{ server.reality_server_name }}"></p>
+  <p><input name="fingerprint" value="{{ server.fingerprint }}">
+  <input name="flow" value="{{ server.flow }}">
+  <select name="transport">{% for value in ["raw","tcp","xhttp"] %}<option {{ "selected" if server.transport == value }}>{{ value }}</option>{% endfor %}</select></p>
+  <p><select name="management_mode">{% for value in ["manual","local_config","ssh_future","agent_future"] %}<option {{ "selected" if server.management_mode == value }}>{{ value }}</option>{% endfor %}</select>
+  <input name="xray_config_path" value="{{ server.xray_config_path or '' }}">
+  <input type="number" name="priority" value="{{ server.priority }}">
+  <input type="number" name="max_devices" value="{{ server.max_devices or '' }}" placeholder="Лимит устройств"></p>
+  <button>Сохранить</button>
+</form>
+<br>
+<form class="inline" method="post" action="/admin/servers/{{ server.id }}/toggle"><button>{{ "Выключить" if server.is_active else "Включить" }}</button></form>
+<form class="inline" method="post" action="/admin/servers/{{ server.id }}/default"><button>Сделать default</button></form>
+<form class="inline" method="post" action="/admin/servers/{{ server.id }}/health"><button>Проверить статус</button></form>
+<form class="inline" method="post" action="/admin/servers/{{ server.id }}/delete"><button class="danger">Удалить</button></form>
+<h2>Активные профили</h2>
+<table><tr><th>Device ID</th><th>UUID</th><th>Email</th></tr>
+{% for profile in profiles %}<tr><td>{{ profile.device_id }}</td><td>{{ profile.credential }}</td><td>{{ profile.client_email }}</td></tr>{% endfor %}
+</table>
+{% endblock %}
