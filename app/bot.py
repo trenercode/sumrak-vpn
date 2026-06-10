@@ -5,7 +5,7 @@ from datetime import UTC, datetime
 
 from aiogram import Bot, Dispatcher, F, Router
 from aiogram.filters import Command, CommandObject, CommandStart
-from aiogram.types import CallbackQuery, Message
+from aiogram.types import BotCommand, CallbackQuery, Message
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
@@ -154,6 +154,20 @@ async def start(message: Message, command: CommandObject):
                 except Exception:
                     logging.exception("Could not notify referrer")
     await message.answer(START_TEXT, reply_markup=main_keyboard())
+
+
+@router.message(Command("privacy"))
+async def privacy(message: Message):
+    await message.answer(
+        "https://telegra.ph/POLITIKA-KONFIDENCIALNOSTI-PO-RABOTE-S-PERSONALNYMI-DANNYMI-POLZOVATELEJ-06-10-3"
+    )
+
+
+@router.message(Command("terms"))
+async def terms(message: Message):
+    await message.answer(
+        "https://telegra.ph/Polzovatelskoe-soglashenie-Publichnaya-oferta-06-10-5"
+    )
 
 
 @router.message(Command("menu"))
@@ -542,6 +556,13 @@ async def main():
     async with engine.begin() as connection:
         await connection.run_sync(Base.metadata.create_all)
     bot = Bot(settings.bot_token)
+    await bot.set_my_commands(
+        [
+            BotCommand(command="start", description="Старт"),
+            BotCommand(command="privacy", description="Политика конфиденциальности"),
+            BotCommand(command="terms", description="Пользовательское соглашение"),
+        ]
+    )
     dispatcher = Dispatcher()
     dispatcher.include_router(router)
     tasks = [
