@@ -108,6 +108,7 @@ def profile_keyboard(device_id: str | None = None):
         text="💻 Инструкция для Windows/macOS", callback_data="help:platform:desktop"
     )
     add_support_button(keyboard)
+    keyboard.button(text="⬅️ Назад", callback_data="device:list")
     keyboard.adjust(1)
     return keyboard.as_markup()
 
