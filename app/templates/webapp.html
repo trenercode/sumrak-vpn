@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#070711">
+  <title>Sumrak VPN</title>
+  <link rel="stylesheet" href="{{ url_for('static', path='/webapp.css') }}">
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+</head>
+<body>
+  <div class="ambient ambient-one"></div>
+  <div class="ambient ambient-two"></div>
+  <main class="app-shell">
+    <header class="topbar">
+      <div class="brand">
+        <img src="{{ url_for('static', path='/sumrak-logo.png') }}" alt="Sumrak VPN">
+        <div><strong>SUMRAK</strong><span>VPN</span></div>
+      </div>
+      <button class="icon-button" data-action="support" aria-label="Поддержка">?</button>
+    </header>
+
+    <section class="screen active" data-screen="home">
+      <div class="hero-card">
+        <div class="hero-glow"></div>
+        <p class="eyebrow">Ваш приватный интернет</p>
+        <div class="status-orb"><span id="status-icon">✓</span></div>
+        <h1 id="hero-title">Загружаем статус</h1>
+        <p id="hero-subtitle">Подключаемся к Sumrak VPN</p>
+        <button class="primary-button" data-action="connect">Подключить VPN</button>
+      </div>
+      <div class="metric-grid">
+        <article class="metric"><span>Осталось</span><strong id="days-left">—</strong><small>дней доступа</small></article>
+        <article class="metric"><span>Устройства</span><strong id="device-count">—</strong><small>подключено</small></article>
+      </div>
+      <h2>Управление</h2>
+      <div class="action-grid">
+        <button class="action-card" data-nav="devices"><b>⌁</b><span>Мои устройства</span><small>Профили и страны</small></button>
+        <button class="action-card" data-nav="subscription"><b>◷</b><span>Подписка</span><small>Статус доступа</small></button>
+        <button class="action-card" data-nav="instructions"><b>?</b><span>Инструкции</span><small>Как подключиться</small></button>
+        <button class="action-card" data-nav="referral"><b>✦</b><span>Пригласить друга</span><small>Получить +15 дней</small></button>
+      </div>
+    </section>
+
+    <section class="screen" data-screen="devices">
+      <div class="section-head"><div><p class="eyebrow">Ваши подключения</p><h1>Мои устройства</h1></div><button class="round-button" data-action="add-device">+</button></div>
+      <p class="muted">Одна ссылка подписки содержит все доступные страны.</p>
+      <div id="device-list" class="stack"></div>
+    </section>
+
+    <section class="screen" data-screen="subscription">
+      <p class="eyebrow">Доступ</p><h1>Подписка</h1>
+      <article class="subscription-card">
+        <span id="subscription-badge" class="badge">—</span>
+        <h2 id="subscription-title">Загружаем</h2>
+        <p id="subscription-date" class="muted">—</p>
+        <div class="progress"><i id="subscription-progress"></i></div>
+        <p id="subscription-devices" class="muted">—</p>
+      </article>
+      <button class="primary-button wide" data-action="renew">Продлить подписку</button>
+      <button class="secondary-button wide" data-action="support">Написать в поддержку</button>
+    </section>
+
+    <section class="screen" data-screen="instructions">
+      <p class="eyebrow">Быстрый старт</p><h1>Как подключить VPN</h1>
+      <p class="muted">Выберите платформу, установите клиент и импортируйте ссылку подписки.</p>
+      <div id="platform-list" class="platform-grid"></div>
+      <div id="client-list" class="stack"></div>
+    </section>
+
+    <section class="screen" data-screen="referral">
+      <p class="eyebrow">Бонусы</p><h1>Реферальная программа</h1>
+      <article class="referral-card">
+        <b>+15 дней за друга</b>
+        <p>Друг получит скидку 50% на первую оплату, а вы получите бонус после его оплаты.</p>
+        <button class="light-button" data-action="copy-referral">Скопировать мою ссылку</button>
+      </article>
+      <div class="metric-grid">
+        <article class="metric"><span>Приглашено</span><strong id="ref-invited">—</strong><small>пользователей</small></article>
+        <article class="metric"><span>Начислено</span><strong id="ref-days">—</strong><small>бонусных дней</small></article>
+      </div>
+      <h2>Последние приглашённые</h2>
+      <div id="referral-list" class="stack"></div>
+    </section>
+  </main>
+
+  <nav class="bottom-nav">
+    <button class="active" data-nav="home"><b>⌂</b><span>Главная</span></button>
+    <button data-nav="devices"><b>⌁</b><span>Устройства</span></button>
+    <button data-nav="instructions"><b>?</b><span>Инструкции</span></button>
+    <button data-nav="referral"><b>✦</b><span>Бонусы</span></button>
+  </nav>
+
+  <div id="sheet" class="sheet-backdrop">
+    <div class="sheet">
+      <div class="sheet-handle"></div>
+      <div class="section-head"><h2 id="sheet-title">Добавить устройство</h2><button class="icon-button" data-action="close-sheet">×</button></div>
+      <div id="sheet-content"></div>
+    </div>
+  </div>
+  <div id="toast" class="toast"></div>
+  <script src="{{ url_for('static', path='/webapp.js') }}"></script>
+</body>
+</html>

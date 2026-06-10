@@ -11,6 +11,8 @@ class Settings(BaseSettings):
     bot_username: str = ""
     support_telegram_url: str = ""
     panel_public_url: str = "http://127.0.0.1:8000"
+    webapp_url: str = ""
+    webapp_dev_telegram_id: int | None = None
     admin_username: str = "admin"
     admin_password: str = "change-me-now"
     trial_days: int = 3

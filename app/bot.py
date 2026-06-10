@@ -5,7 +5,7 @@ from datetime import UTC, datetime
 
 from aiogram import Bot, Dispatcher, F, Router
 from aiogram.filters import Command, CommandObject, CommandStart
-from aiogram.types import BotCommand, CallbackQuery, Message
+from aiogram.types import BotCommand, CallbackQuery, Message, WebAppInfo
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
@@ -69,6 +69,12 @@ def add_support_button(keyboard: InlineKeyboardBuilder, text: str = "🆘 Тех
 
 def main_keyboard():
     keyboard = InlineKeyboardBuilder()
+    keyboard.button(
+        text="🌑 Открыть Sumrak VPN",
+        web_app=WebAppInfo(
+            url=settings.webapp_url or f"{settings.panel_public_url.rstrip('/')}/webapp"
+        ),
+    )
     keyboard.button(text="🚀 Получить профиль", callback_data="device:create:start")
     keyboard.button(text="📱 Мои устройства", callback_data="device:list")
     keyboard.button(text="💳 Подписка", callback_data="subscription:status")
