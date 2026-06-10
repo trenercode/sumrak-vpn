@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+{% block title %}VPN-клиенты — Sumrak VPN{% endblock %}
+{% block content %}
+<h1>VPN-клиенты и инструкции</h1>
+<div class="card">
+  <h2>Добавить приложение</h2>
+  <form method="post" action="/admin/clients">
+    <select name="platform">{% for p in ["ios","android","windows","macos","android_tv","other"] %}<option>{{ p }}</option>{% endfor %}</select>
+    <input name="name" placeholder="Название" required>
+    <input name="download_url" placeholder="Ссылка для скачивания" required>
+    <input type="number" name="sort_order" value="100">
+    <p><textarea name="description" placeholder="Описание"></textarea></p>
+    <p><textarea name="instruction_text" placeholder="Инструкция" required></textarea></p>
+    <button>Добавить</button>
+  </form>
+</div>
+{% for client in clients %}
+<div class="card">
+  <form method="post" action="/admin/clients/{{ client.id }}">
+    <select name="platform">{% for p in ["ios","android","windows","macos","android_tv","other"] %}<option {{ "selected" if client.platform == p }}>{{ p }}</option>{% endfor %}</select>
+    <input name="name" value="{{ client.name }}" required>
+    <input name="download_url" value="{{ client.download_url }}" required>
+    <input type="number" name="sort_order" value="{{ client.sort_order }}">
+    <p><textarea name="description">{{ client.description }}</textarea></p>
+    <p><textarea name="instruction_text" required>{{ client.instruction_text }}</textarea></p>
+    <button>Сохранить</button>
+  </form>
+  <form method="post" action="/admin/clients/{{ client.id }}/toggle">
+    <button class="{{ '' if client.is_active else 'danger' }}">{{ "Выключить" if client.is_active else "Включить" }}</button>
+  </form>
+</div><br>
+{% endfor %}
+{% endblock %}

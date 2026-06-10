@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+{% block title %}Обзор — VPN Admin{% endblock %}
+{% block content %}
+<h1>Обзор</h1>
+<div class="cards">
+  <div class="card"><span class="muted">Пользователи</span><div class="value">{{ total_users }}</div></div>
+  <div class="card"><span class="muted">Активный доступ</span><div class="value">{{ active_users }}</div></div>
+  <div class="card"><span class="muted">Активные устройства</span><div class="value">{{ active_devices }}</div></div>
+  <div class="card"><span class="muted">Онлайн за 3 минуты</span><div class="value">{{ online_devices }}</div></div>
+</div>
+<h2>Новые пользователи</h2>
+<table>
+  <tr><th>Telegram</th><th>Имя</th><th>Дата</th></tr>
+  {% for user in recent_users %}
+  <tr>
+    <td><a href="/admin/users/{{ user.id }}">@{{ user.username or user.telegram_id }}</a></td>
+    <td>{{ user.full_name }}</td><td>{{ user.created_at.strftime("%d.%m.%Y") }}</td>
+  </tr>
+  {% endfor %}
+</table>
+{% endblock %}

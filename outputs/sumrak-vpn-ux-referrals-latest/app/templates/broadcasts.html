@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{% block title %}Рассылки — Sumrak VPN{% endblock %}
+{% block content %}
+<h1>Рассылки</h1>
+<div class="card">
+  <h2>Новая рассылка</h2>
+  <form method="post" action="/admin/broadcasts">
+    <p><input name="title" placeholder="Название для админки" required></p>
+    <p><textarea name="text" placeholder="Текст сообщения" required></textarea></p>
+    <p><input name="image_file_id_or_url" placeholder="Telegram file_id или URL картинки"></p>
+    <select name="target_type">
+      <option value="all">Все пользователи</option>
+      <option value="active">Только активные</option>
+      <option value="expiring">Подписка истекает ≤ 3 дней</option>
+      <option value="single">Один пользователь</option>
+    </select>
+    <input name="target_user_id" placeholder="User UUID для одного пользователя">
+    <button>Предпросмотр</button>
+  </form>
+</div>
+<h2>История</h2>
+<table><tr><th>Название</th><th>Аудитория</th><th>Статус</th><th>Создано</th></tr>
+{% for item in broadcasts %}<tr><td><a href="/admin/broadcasts/{{ item.id }}">{{ item.title }}</a></td><td>{{ item.target_type }}</td><td>{{ item.status }}</td><td>{{ item.created_at.strftime("%d.%m.%Y %H:%M") }}</td></tr>{% endfor %}
+</table>
+{% endblock %}

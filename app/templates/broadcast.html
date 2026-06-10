@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+{% block title %}{{ broadcast.title }} — Рассылка{% endblock %}
+{% block content %}
+<h1>{{ broadcast.title }}</h1>
+<p>Аудитория: {{ broadcast.target_type }} · Статус: {{ broadcast.status }}</p>
+<div class="card">
+  {% if broadcast.image_file_id_or_url %}<p>Картинка: {{ broadcast.image_file_id_or_url }}</p>{% endif %}
+  <p style="white-space: pre-wrap">{{ broadcast.text }}</p>
+</div>
+<p>Отправлено: {{ counts.get("sent", 0) }} · Ошибки: {{ counts.get("failed", 0) }} · Ожидает: {{ counts.get("pending", 0) }}</p>
+{% if broadcast.status == "draft" %}
+<form method="post" action="/admin/broadcasts/{{ broadcast.id }}/send">
+  <button>Подтвердить и отправить</button>
+</form>
+{% endif %}
+{% endblock %}

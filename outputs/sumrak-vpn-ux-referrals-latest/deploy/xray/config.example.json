@@ -1,0 +1,35 @@
+{
+  "log": {"loglevel": "warning"},
+  "api": {
+    "tag": "api",
+    "listen": "127.0.0.1:10085",
+    "services": ["StatsService", "ReflectionService"]
+  },
+  "policy": {
+    "levels": {
+      "0": {"statsUserUplink": true, "statsUserDownlink": true}
+    }
+  },
+  "stats": {},
+  "inbounds": [
+    {
+      "tag": "vless-reality",
+      "listen": "0.0.0.0",
+      "port": 8443,
+      "protocol": "vless",
+      "settings": {"clients": [], "decryption": "none"},
+      "streamSettings": {
+        "network": "raw",
+        "security": "reality",
+        "realitySettings": {
+          "show": false,
+          "target": "www.microsoft.com:443",
+          "serverNames": ["www.microsoft.com"],
+          "privateKey": "GENERATE_WITH_SETUP_SCRIPT",
+          "shortIds": ["GENERATE_WITH_SETUP_SCRIPT"]
+        }
+      }
+    }
+  ],
+  "outbounds": [{"tag": "direct", "protocol": "freedom"}]
+}
