@@ -5,7 +5,7 @@ from datetime import UTC, datetime
 
 from aiogram import Bot, Dispatcher, F, Router
 from aiogram.filters import Command, CommandObject, CommandStart
-from aiogram.types import BotCommand, CallbackQuery, Message, WebAppInfo
+from aiogram.types import CallbackQuery, MenuButtonWebApp, Message, WebAppInfo
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
@@ -562,12 +562,14 @@ async def main():
     async with engine.begin() as connection:
         await connection.run_sync(Base.metadata.create_all)
     bot = Bot(settings.bot_token)
-    await bot.set_my_commands(
-        [
-            BotCommand(command="start", description="Старт"),
-            BotCommand(command="privacy", description="Политика конфиденциальности"),
-            BotCommand(command="terms", description="Пользовательское соглашение"),
-        ]
+    await bot.delete_my_commands()
+    await bot.set_chat_menu_button(
+        menu_button=MenuButtonWebApp(
+            text="Sumrak VPN",
+            web_app=WebAppInfo(
+                url=settings.webapp_url or f"{settings.panel_public_url.rstrip('/')}/webapp"
+            ),
+        )
     )
     dispatcher = Dispatcher()
     dispatcher.include_router(router)
