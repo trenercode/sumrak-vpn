@@ -69,12 +69,6 @@ def add_support_button(keyboard: InlineKeyboardBuilder, text: str = "🆘 Тех
 
 def main_keyboard():
     keyboard = InlineKeyboardBuilder()
-    keyboard.button(
-        text="🌑 Открыть Sumrak VPN",
-        web_app=WebAppInfo(
-            url=settings.webapp_url or f"{settings.panel_public_url.rstrip('/')}/webapp"
-        ),
-    )
     keyboard.button(text="🚀 Получить профиль", callback_data="device:create:start")
     keyboard.button(text="📱 Мои устройства", callback_data="device:list")
     keyboard.button(text="💳 Подписка", callback_data="subscription:status")
@@ -272,7 +266,7 @@ async def device_create(callback: CallbackQuery):
     subscription_url = f"{settings.panel_public_url.rstrip('/')}/sub/{device.subscription_token}"
     text = (
         "Ваш VPN-профиль готов ✅\n\n"
-        "Добавьте ссылку подписки в приложение Hiddify/Streisand.\n"
+        "Добавьте ссылку в приложение Happ/Streisand.\n"
         "Внутри приложения вы увидите доступные страны и сможете переключаться между ними.\n\n"
         f"<code>{html.escape(subscription_url)}</code>"
     )
