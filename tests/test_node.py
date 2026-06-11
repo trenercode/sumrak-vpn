@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from app.config import Settings, get_settings
 from app.db import get_session
 from app.main import app
-from app.models import Base, DeviceServerProfile, NodeEnrollment, VpnServer
+from app.models import Base, Device, DeviceServerProfile, NodeEnrollment, User, VpnServer
 from app.nodes import AgentNodeManager
 
 
@@ -34,7 +34,34 @@ def test_node_install_register_sync_and_report():
                 expected_country_code="FR",
                 status="pending",
             )
-            session.add(enrollment)
+            user = User(
+                telegram_id=123,
+                full_name="Active user",
+                subscription_ends_at=datetime.now(UTC) + timedelta(days=30),
+            )
+            session.add_all([enrollment, user])
+            await session.flush()
+            session.add(
+                Device(
+                    user_id=user.id,
+                    name="iPhone 1",
+                    platform="ios",
+                    credential="device-credential",
+                    client_email="device-email",
+                )
+            )
+            session.add(
+                VpnServer(
+                    name="Old France",
+                    public_host="31.56.146.138",
+                    public_port=443,
+                    reality_server_name="www.microsoft.com",
+                    reality_public_key="old-key",
+                    reality_short_id="0123456789abcdef",
+                    management_mode="agent",
+                    is_active=True,
+                )
+            )
             await session.commit()
 
         async def override_session():
@@ -85,26 +112,22 @@ def test_node_install_register_sync_and_report():
 
             async with sessions() as session:
                 server = await session.scalar(select(VpnServer).where(VpnServer.name == "France"))
+                old_server = await session.scalar(
+                    select(VpnServer).where(VpnServer.name == "Old France")
+                )
                 assert server.management_mode == "agent"
                 assert server.transport == "xhttp"
-                session.add(
-                    DeviceServerProfile(
-                        device_id="device-id",
-                        server_id=server.id,
-                        credential="uuid",
-                        client_email="device@test",
-                        uri="vless://uuid",
-                        is_active=True,
-                    )
+                assert not old_server.is_active
+                profile = await session.scalar(
+                    select(DeviceServerProfile).where(DeviceServerProfile.server_id == server.id)
                 )
-                await session.commit()
+                assert profile is not None
 
             headers = {"Authorization": "Bearer agent-secret"}
             sync = client.get("/api/node/sync", headers=headers)
             assert sync.status_code == 200
-            assert sync.json()["clients"] == [
-                {"id": "uuid", "email": "device@test", "flow": ""}
-            ]
+            assert len(sync.json()["clients"]) == 1
+            assert sync.json()["clients"][0]["flow"] == ""
             assert client.get("/api/node/sync").status_code == 401
             report = client.post(
                 "/api/node/report",

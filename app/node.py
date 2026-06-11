@@ -1,4 +1,5 @@
 import secrets
+import uuid
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -10,7 +11,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import Settings, get_settings
 from app.db import get_session
-from app.models import DeviceServerProfile, NodeEnrollment, VpnServer
+from app.models import Device, DeviceServerProfile, NodeEnrollment, User, VpnServer
+from app.nodes import render_server_uri
+from app.services import has_access
+from app.vpn import new_client_email
 
 router = APIRouter(tags=["node"])
 BASE_DIR = Path(__file__).resolve().parent
@@ -66,6 +70,54 @@ async def authenticated_agent(
     if server is None or not secrets.compare_digest(server.agent_token or "", token):
         raise HTTPException(401, "Invalid agent token")
     return server
+
+
+async def reconcile_agent_server(session: AsyncSession, server: VpnServer) -> int:
+    replaced = list(
+        await session.scalars(
+            select(VpnServer).where(
+                VpnServer.id != server.id,
+                VpnServer.management_mode.in_(["agent", "agent_future"]),
+                VpnServer.public_host == server.public_host,
+                VpnServer.public_port == server.public_port,
+                VpnServer.is_active.is_(True),
+            )
+        )
+    )
+    for item in replaced:
+        item.is_active = False
+
+    existing_device_ids = set(
+        await session.scalars(
+            select(DeviceServerProfile.device_id).where(
+                DeviceServerProfile.server_id == server.id
+            )
+        )
+    )
+    devices = (
+        await session.execute(
+            select(Device, User)
+            .join(User, Device.user_id == User.id)
+            .where(Device.is_revoked.is_(False))
+        )
+    ).all()
+    created = 0
+    for device, user in devices:
+        if device.id in existing_device_ids or not has_access(user):
+            continue
+        credential = str(uuid.uuid4())
+        session.add(
+            DeviceServerProfile(
+                device_id=device.id,
+                server_id=server.id,
+                credential=credential,
+                client_email=new_client_email(),
+                uri=render_server_uri(server, credential),
+            )
+        )
+        created += 1
+    await session.flush()
+    return created
 
 
 @router.get("/node/install.sh", response_class=PlainTextResponse)
@@ -192,6 +244,8 @@ async def register_node(
         is_active=True,
     )
     session.add(server)
+    await session.flush()
+    await reconcile_agent_server(session, server)
     enrollment.used_at = current
     enrollment.status = "used"
     await session.commit()
@@ -204,6 +258,7 @@ async def sync_node(
     session: AsyncSession = Depends(get_session),
 ):
     current = datetime.now(UTC)
+    await reconcile_agent_server(session, server)
     clients = [
         {"id": profile.credential, "email": profile.client_email, "flow": server.flow or ""}
         for profile in await session.scalars(
