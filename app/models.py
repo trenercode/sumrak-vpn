@@ -112,6 +112,12 @@ class VpnServer(Base):
     remote_xray_config_path: Mapped[str | None] = mapped_column(Text)
     remote_compose_dir: Mapped[str | None] = mapped_column(Text)
     remote_container_name: Mapped[str | None] = mapped_column(String(255))
+    agent_token: Mapped[str | None] = mapped_column(String(128), unique=True, index=True)
+    agent_last_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    agent_last_sync_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    agent_version: Mapped[str | None] = mapped_column(String(64))
+    agent_last_error: Mapped[str | None] = mapped_column(Text)
+    agent_clients_count: Mapped[int | None] = mapped_column(Integer)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
     is_default: Mapped[bool] = mapped_column(Boolean, default=False)
     priority: Mapped[int] = mapped_column(Integer, default=100)
@@ -125,6 +131,19 @@ class VpnServer(Base):
     )
 
     profiles: Mapped[list["DeviceServerProfile"]] = relationship(back_populates="server")
+
+
+class NodeEnrollment(Base):
+    __tablename__ = "node_enrollments"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    node_token: Mapped[str] = mapped_column(String(128), unique=True, index=True)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    server_name: Mapped[str] = mapped_column(String(100))
+    expected_country_code: Mapped[str] = mapped_column(String(8), default="")
+    status: Mapped[str] = mapped_column(String(20), default="pending", index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
 class DeviceServerProfile(Base):

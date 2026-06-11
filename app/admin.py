@@ -15,6 +15,7 @@ from app.models import (
     BroadcastRecipient,
     Device,
     DeviceServerProfile,
+    NodeEnrollment,
     User,
     VpnClient,
     VpnServer,
@@ -165,7 +166,47 @@ async def servers(request: Request, session: AsyncSession = Depends(get_session)
     items = list(await session.scalars(select(VpnServer).order_by(VpnServer.priority, VpnServer.name)))
     for item in items:
         await update_server_device_count(session, item)
-    return templates(request).TemplateResponse(request, "servers.html", {"servers": items})
+    enrollments = list(
+        await session.scalars(
+            select(NodeEnrollment).order_by(NodeEnrollment.created_at.desc()).limit(20)
+        )
+    )
+    return templates(request).TemplateResponse(
+        request, "servers.html", {"servers": items, "enrollments": enrollments}
+    )
+
+
+@router.post("/servers/enroll", response_class=HTMLResponse, dependencies=[Depends(require_admin)])
+async def server_enroll(
+    request: Request,
+    server_name: str = Form(...),
+    expected_country_code: str = Form(""),
+    session: AsyncSession = Depends(get_session),
+):
+    enrollment = NodeEnrollment(
+        node_token=secrets.token_urlsafe(32),
+        expires_at=datetime.now(UTC) + timedelta(minutes=30),
+        server_name=server_name,
+        expected_country_code=expected_country_code.upper(),
+        status="pending",
+    )
+    session.add(enrollment)
+    await session.commit()
+    items = list(await session.scalars(select(VpnServer).order_by(VpnServer.priority, VpnServer.name)))
+    enrollments = list(
+        await session.scalars(
+            select(NodeEnrollment).order_by(NodeEnrollment.created_at.desc()).limit(20)
+        )
+    )
+    command = (
+        f"curl -sSL {get_settings().panel_public_url.rstrip('/')}/node/install.sh "
+        f"| bash -s -- {enrollment.node_token}"
+    )
+    return templates(request).TemplateResponse(
+        request,
+        "servers.html",
+        {"servers": items, "enrollments": enrollments, "enrollment_command": command},
+    )
 
 
 @router.post("/servers", dependencies=[Depends(require_admin)])

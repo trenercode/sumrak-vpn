@@ -4,6 +4,18 @@
 <h1>VPN-серверы</h1>
 {% if config_error %}<div class="card"><strong>Конфиг Xray не применён:</strong> {{ config_error }}</div><br>{% endif %}
 <div class="card">
+  <h2>Подключить новую ноду</h2>
+  <form method="post" action="/admin/servers/enroll">
+    <input name="server_name" placeholder="Название ноды" required>
+    <input name="expected_country_code" placeholder="Код страны, FR">
+    <button>Подключить новую ноду</button>
+  </form>
+  {% if enrollment_command %}
+  <p>Выполните на новой ноде от root в течение 30 минут:</p>
+  <pre><code>{{ enrollment_command }}</code></pre>
+  {% endif %}
+</div><br>
+<div class="card">
   <h2>Добавить сервер</h2>
   <form method="post" action="/admin/servers">
     <p><input name="name" placeholder="Название" required>
@@ -41,7 +53,7 @@
       <option value="remote_config">Remote config / SSH (рекомендуется для удалённых нод)</option>
       <option value="manual">Manual: панель НЕ управляет Xray config</option>
       <option value="local_config">Local config</option>
-      <option value="agent_future">Agent future</option>
+      <option value="agent">Agent</option>
     </select>
     <input name="xray_config_path" placeholder="/data/xray/config.json">
     <input type="number" name="priority" value="100">
@@ -71,6 +83,13 @@
     <td>{{ server.health_status }}</td>
     <td>{{ "default · " if server.is_default else "" }}{{ "активен" if server.is_active else "выключен" }}</td>
   </tr>
+  {% endfor %}
+</table>
+<h2>Последние подключения нод</h2>
+<table>
+  <tr><th>Нода</th><th>Страна</th><th>Статус</th><th>Истекает</th><th>Использован</th></tr>
+  {% for item in enrollments %}
+  <tr><td>{{ item.server_name }}</td><td>{{ item.expected_country_code or "—" }}</td><td>{{ item.status }}</td><td>{{ item.expires_at }}</td><td>{{ item.used_at or "—" }}</td></tr>
   {% endfor %}
 </table>
 <script>

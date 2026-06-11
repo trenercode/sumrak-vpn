@@ -3,7 +3,7 @@ import json
 import shlex
 import uuid
 from abc import ABC, abstractmethod
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from urllib.parse import quote, urlencode
 
 from sqlalchemy import func, select
@@ -224,7 +224,15 @@ class RemoteConfigNodeManager(NodeManager):
 
 
 class AgentNodeManager(ManualNodeManager):
-    """Placeholder for the future sumrak-node-agent integration."""
+    async def health_check(self, server: VpnServer) -> str | None:
+        if server.agent_last_seen_at is None:
+            return "offline"
+        seen = server.agent_last_seen_at
+        if seen.tzinfo is None:
+            seen = seen.replace(tzinfo=UTC)
+        if seen < datetime.now(UTC) - timedelta(minutes=2):
+            return "offline"
+        return "error" if server.agent_last_error else "online"
 
 
 class NodeManagerRegistry:
@@ -235,6 +243,7 @@ class NodeManagerRegistry:
             "manual": ManualNodeManager(settings),
             "remote_config": RemoteConfigNodeManager(settings),
             "ssh_future": RemoteConfigNodeManager(settings),
+            "agent": AgentNodeManager(settings),
             "agent_future": AgentNodeManager(settings),
         }
 

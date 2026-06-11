@@ -14,6 +14,7 @@ from app.config import get_settings
 from app.db import engine, get_session
 from app.models import Base, Device
 from app.nodes import NodeManagerRegistry, ensure_default_server
+from app.node import router as node_router
 from app.services import subscription_uris
 from app.webapp import router as webapp_router
 
@@ -38,6 +39,7 @@ app.state.nodes = NodeManagerRegistry(get_settings())
 app.mount("/static", StaticFiles(directory=BASE_DIR / "static"), name="static")
 app.include_router(admin_router)
 app.include_router(webapp_router)
+app.include_router(node_router)
 
 
 @app.get("/health")

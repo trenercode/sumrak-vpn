@@ -7,6 +7,14 @@
 <div class="card"><strong>Внимание:</strong> Manual: панель НЕ управляет Xray config, UUID нужно добавлять вручную.</div><br>
 {% endif %}
 <p>Health: {{ server.health_status }} · Последняя проверка: {{ server.last_health_check_at or "—" }} · Устройства: {{ server.current_devices or 0 }}</p>
+{% if server.management_mode in ["agent","agent_future"] %}
+<div class="card">
+  <strong>Sumrak Node Agent</strong>
+  <p>Last seen: {{ server.agent_last_seen_at or "—" }} · Last sync: {{ server.agent_last_sync_at or "—" }}</p>
+  <p>Version: {{ server.agent_version or "—" }} · Clients: {{ server.agent_clients_count or 0 }}</p>
+  <p>Last error: {{ server.agent_last_error or "—" }}</p>
+</div><br>
+{% endif %}
 <form method="post" action="/admin/servers/{{ server.id }}">
   <p><input name="name" value="{{ server.name }}" required>
   <input name="country_code" value="{{ server.country_code }}">
@@ -39,8 +47,8 @@
     <p><input name="flow" value="{{ server.flow or 'xtls-rprx-vision' }}" readonly></p>
   </div>
   <p><select name="management_mode" data-management-select>
-    {% for value, label in [("remote_config","Remote config / SSH (рекомендуется для удалённых нод)"),("manual","Manual: панель НЕ управляет Xray config"),("local_config","Local config"),("agent_future","Agent future")] %}
-    <option value="{{ value }}" {{ "selected" if server.management_mode in ([value] if value != "remote_config" else ["remote_config","ssh_future"]) }}>{{ label }}</option>
+    {% for value, label in [("agent","Agent"),("remote_config","Remote config / SSH"),("manual","Manual: панель НЕ управляет Xray config"),("local_config","Local config")] %}
+    <option value="{{ value }}" {{ "selected" if server.management_mode in ([value] if value not in ["remote_config","agent"] else (["remote_config","ssh_future"] if value == "remote_config" else ["agent","agent_future"])) }}>{{ label }}</option>
     {% endfor %}
   </select>
   <input name="xray_config_path" value="{{ server.xray_config_path or '' }}">
