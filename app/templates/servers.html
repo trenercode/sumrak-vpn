@@ -19,11 +19,24 @@
     <p>
     <input name="reality_server_name" value="www.microsoft.com"></p>
     <p><select name="fingerprint">{% for value in ["chrome","firefox","edge","safari","randomized"] %}<option>{{ value }}</option>{% endfor %}</select>
-    <input name="flow" value="xtls-rprx-vision">
-    <select name="transport"><option value="vision">Быстрый режим: Vision</option><option value="xhttp">Стабильный режим: XHTTP</option></select></p>
-    <p class="muted">XHTTP предназначен для тестов стабильности Instagram/Reels/YouTube и работает без flow.</p>
-    <p><input name="xhttp_path" value="/" placeholder="XHTTP path">
-    <select name="xhttp_mode"><option>auto</option><option>packet-up</option><option>stream-up</option><option>stream-one</option></select></p>
+    <select name="transport" data-transport-select>
+      <option value="xhttp">Стабильный режим (рекомендуется) — VLESS + REALITY + XHTTP</option>
+      <option value="vision">Быстрый режим (резервный) — VLESS + REALITY + XTLS Vision</option>
+    </select></p>
+    <div data-transport-section="xhttp">
+      <p><strong>XHTTP (рекомендуется)</strong></p>
+      <p><input name="xhttp_path" value="/" placeholder="XHTTP Path">
+      <select name="xhttp_mode">
+        <option value="auto">Auto (рекомендуется)</option>
+        <option value="packet-up">Manual: packet-up</option>
+        <option value="stream-up">Manual: stream-up</option>
+        <option value="stream-one">Manual: stream-one</option>
+      </select></p>
+    </div>
+    <div data-transport-section="vision" hidden>
+      <p><strong>Vision (резервный)</strong></p>
+      <p><input name="flow" value="xtls-rprx-vision" readonly></p>
+    </div>
     <p><select name="management_mode"><option>manual</option><option>local_config</option><option>ssh_future</option><option>agent_future</option></select>
     <input name="xray_config_path" placeholder="/data/xray/config.json">
     <input type="number" name="priority" value="100">
@@ -44,4 +57,13 @@
   </tr>
   {% endfor %}
 </table>
+<script>
+  document.querySelectorAll("[data-transport-select]").forEach((select) => {
+    const update = () => document.querySelectorAll("[data-transport-section]").forEach((section) => {
+      section.hidden = section.dataset.transportSection !== select.value;
+    });
+    select.addEventListener("change", update);
+    update();
+  });
+</script>
 {% endblock %}

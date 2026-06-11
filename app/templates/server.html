@@ -21,11 +21,23 @@
   <p>
   <input name="reality_server_name" value="{{ server.reality_server_name }}"></p>
   <p><select name="fingerprint">{% for value in ["chrome","firefox","edge","safari","randomized"] %}<option {{ "selected" if server.fingerprint == value }}>{{ value }}</option>{% endfor %}</select>
-  <input name="flow" value="{{ server.flow }}">
-  <select name="transport"><option value="vision" {{ "selected" if server.transport in ["vision","raw","tcp"] }}>Быстрый режим: Vision</option><option value="xhttp" {{ "selected" if server.transport == "xhttp" }}>Стабильный режим: XHTTP</option></select></p>
-  <p class="muted">XHTTP предназначен для тестов стабильности Instagram/Reels/YouTube и работает без flow.</p>
-  <p><input name="xhttp_path" value="{{ server.xhttp_path }}" placeholder="XHTTP path">
-  <select name="xhttp_mode">{% for value in ["auto","packet-up","stream-up","stream-one"] %}<option {{ "selected" if server.xhttp_mode == value }}>{{ value }}</option>{% endfor %}</select></p>
+  <select name="transport" data-transport-select>
+    <option value="xhttp" {{ "selected" if server.transport == "xhttp" }}>Стабильный режим (рекомендуется) — VLESS + REALITY + XHTTP</option>
+    <option value="vision" {{ "selected" if server.transport in ["vision","raw","tcp"] }}>Быстрый режим (резервный) — VLESS + REALITY + XTLS Vision</option>
+  </select></p>
+  <div data-transport-section="xhttp">
+    <p><strong>XHTTP (рекомендуется)</strong></p>
+    <p><input name="xhttp_path" value="{{ server.xhttp_path or '/' }}" placeholder="XHTTP Path">
+    <select name="xhttp_mode">
+      {% for value, label in [("auto","Auto (рекомендуется)"),("packet-up","Manual: packet-up"),("stream-up","Manual: stream-up"),("stream-one","Manual: stream-one")] %}
+      <option value="{{ value }}" {{ "selected" if server.xhttp_mode == value }}>{{ label }}</option>
+      {% endfor %}
+    </select></p>
+  </div>
+  <div data-transport-section="vision">
+    <p><strong>Vision (резервный)</strong></p>
+    <p><input name="flow" value="{{ server.flow or 'xtls-rprx-vision' }}" readonly></p>
+  </div>
   <p><select name="management_mode">{% for value in ["manual","local_config","ssh_future","agent_future"] %}<option {{ "selected" if server.management_mode == value }}>{{ value }}</option>{% endfor %}</select>
   <input name="xray_config_path" value="{{ server.xray_config_path or '' }}">
   <input type="number" name="priority" value="{{ server.priority }}">
@@ -41,4 +53,13 @@
 <table><tr><th>Device ID</th><th>UUID</th><th>Email</th></tr>
 {% for profile in profiles %}<tr><td>{{ profile.device_id }}</td><td>{{ profile.credential }}</td><td>{{ profile.client_email }}</td></tr>{% endfor %}
 </table>
+<script>
+  document.querySelectorAll("[data-transport-select]").forEach((select) => {
+    const update = () => document.querySelectorAll("[data-transport-section]").forEach((section) => {
+      section.hidden = section.dataset.transportSection !== select.value;
+    });
+    select.addEventListener("change", update);
+    update();
+  });
+</script>
 {% endblock %}

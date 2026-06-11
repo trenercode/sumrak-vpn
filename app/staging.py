@@ -24,17 +24,20 @@ async def sync_staging_xray() -> None:
             server.host = settings.xray_public_host
             server.public_host = settings.xray_public_host
             server.public_port = settings.xray_public_port
-            server.transport = "vision"
+            server.transport = "xhttp"
             server.reality_target = f"{settings.xray_reality_server_name}:443"
             server.reality_server_name = settings.xray_reality_server_name
             server.reality_public_key = settings.xray_reality_public_key
             server.reality_short_id = settings.xray_reality_short_id
             server.fingerprint = settings.xray_fingerprint
-            server.flow = settings.xray_flow
+            server.flow = ""
+            server.xhttp_path = "/"
+            server.xhttp_mode = "auto"
         server.xray_config_path = settings.xray_config_path
         server.management_mode = "local_config"
         server.is_active = True
         await session.commit()
+        await nodes.apply_config(server)
 
         profiles = list(
             await session.scalars(

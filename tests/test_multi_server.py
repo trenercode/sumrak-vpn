@@ -9,7 +9,7 @@ from app.config import Settings
 from app.db import get_session
 from app.main import app
 from app.models import Base, DeviceServerProfile, VpnServer
-from app.nodes import NodeManagerRegistry, check_server_health, render_server_uri
+from app.nodes import NodeManagerRegistry, check_server_health, ensure_default_server, render_server_uri
 from app.services import create_device, get_or_create_user, revoke_device, subscription_uris
 
 
@@ -88,6 +88,24 @@ def test_render_uri_uses_xhttp_without_vision_flow():
     assert "headerType=" not in uri
 
 
+async def test_new_default_server_uses_xhttp():
+    engine, sessions = await database()
+    async with sessions() as session:
+        item = await ensure_default_server(
+            session,
+            Settings(
+                xray_public_host="staging.example.com",
+                xray_reality_public_key="public-key",
+                xray_reality_short_id="0123456789abcdef",
+            ),
+        )
+        assert item.transport == "xhttp"
+        assert item.flow == ""
+        assert item.xhttp_path == "/"
+        assert item.xhttp_mode == "auto"
+    await engine.dispose()
+
+
 async def test_health_check_online_and_offline(monkeypatch):
     engine, sessions = await database()
     nodes = NodeManagerRegistry(Settings())
@@ -146,6 +164,9 @@ def test_subscription_endpoint_and_servers_admin():
             response = client.get("/admin/servers", auth=("admin", "change-me-now"))
             assert response.status_code == 200
             assert "Germany" in response.text
+            assert response.text.index("Стабильный режим (рекомендуется)") < response.text.index(
+                "Быстрый режим (резервный)"
+            )
             response = client.post(
                 "/admin/servers",
                 auth=("admin", "change-me-now"),
@@ -163,6 +184,14 @@ def test_subscription_endpoint_and_servers_admin():
                 follow_redirects=False,
             )
             assert response.status_code == 303
+            async with sessions() as session:
+                created_server = await session.scalar(
+                    select(VpnServer).where(VpnServer.name == "Netherlands")
+                )
+                assert created_server.transport == "xhttp"
+                assert created_server.flow == ""
+                assert created_server.xhttp_path == "/"
+                assert created_server.xhttp_mode == "auto"
         app.dependency_overrides.clear()
         await engine.dispose()
 
