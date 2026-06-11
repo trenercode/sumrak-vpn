@@ -205,7 +205,10 @@ async def create_device(
         for profile in profiles:
             server = await session.get(VpnServer, profile.server_id)
             if server:
+                profile.is_active = False
+                await session.flush()
                 await nodes.revoke(server, profile.client_email)
+                await nodes.sync_server(session, server)
         await session.rollback()
         raise
     await session.refresh(device)
@@ -248,10 +251,12 @@ async def revoke_device(
         if not profile.is_active:
             continue
         server = await session.get(VpnServer, profile.server_id)
-        if server:
-            await nodes.revoke(server, profile.client_email)
         profile.is_active = False
         profile.revoked_at = now()
+        if server:
+            await nodes.revoke(server, profile.client_email)
+            await session.flush()
+            await nodes.sync_server(session, server)
     device.is_revoked = True
     device.revoked_at = now()
     await session.commit()
@@ -274,14 +279,21 @@ async def reconcile_vpn(
             else:
                 for profile in profiles:
                     server = await session.get(VpnServer, profile.server_id)
-                    if server and profile.is_active:
-                        await nodes.revoke(server, profile.client_email)
                     profile.is_active = False
                     profile.revoked_at = now()
+                    if server:
+                        await nodes.revoke(server, profile.client_email)
+                        await session.flush()
+                        await nodes.sync_server(session, server)
                 device.is_revoked = True
                 device.revoked_at = now()
     servers = list(await session.scalars(select(VpnServer).where(VpnServer.is_active.is_(True))))
     for server in servers:
+        if server.management_mode in {"remote_config", "ssh_future"}:
+            try:
+                await nodes.sync_server(session, server)
+            except Exception:
+                continue
         try:
             stats = await nodes.stats(server)
         except Exception:

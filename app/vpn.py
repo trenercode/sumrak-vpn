@@ -226,6 +226,20 @@ class XrayBackend(VpnBackend):
     def _build_server_config(self, server) -> tuple[Path, Path]:
         config_path = Path(self.settings.xray_config_path)
         config = json.loads(config_path.read_text())
+        self.render_server_config(config, server)
+
+        candidate_path = config_path.with_name(f"{config_path.stem}.candidate{config_path.suffix}")
+        with candidate_path.open("w") as output:
+            json.dump(config, output, ensure_ascii=True, indent=2)
+            output.write("\n")
+            output.flush()
+            os.fsync(output.fileno())
+        os.chmod(candidate_path, stat.S_IMODE(config_path.stat().st_mode))
+        json.loads(candidate_path.read_text())
+        container_config = Path(self.settings.xray_container_config_path)
+        return candidate_path, container_config.with_name(candidate_path.name)
+
+    def render_server_config(self, config: dict, server, clients: list[dict] | None = None) -> dict:
         inbound = next(
             (
                 item
@@ -238,12 +252,17 @@ class XrayBackend(VpnBackend):
             raise RuntimeError(f"Xray inbound {self.settings.xray_inbound_tag!r} not found")
 
         is_xhttp = server.transport == "xhttp"
-        clients = inbound.setdefault("settings", {}).setdefault("clients", [])
-        for client in clients:
+        rendered_clients = (
+            [dict(client) for client in clients]
+            if clients is not None
+            else inbound.setdefault("settings", {}).setdefault("clients", [])
+        )
+        for client in rendered_clients:
             if is_xhttp:
                 client.pop("flow", None)
             else:
                 client["flow"] = server.flow or "xtls-rprx-vision"
+        inbound.setdefault("settings", {})["clients"] = rendered_clients
 
         inbound["port"] = server.public_port
         stream = inbound.setdefault("streamSettings", {})
@@ -260,17 +279,7 @@ class XrayBackend(VpnBackend):
         reality["target"] = server.reality_target
         reality["serverNames"] = [server.reality_server_name]
         reality["shortIds"] = [server.reality_short_id]
-
-        candidate_path = config_path.with_name(f"{config_path.stem}.candidate{config_path.suffix}")
-        with candidate_path.open("w") as output:
-            json.dump(config, output, ensure_ascii=True, indent=2)
-            output.write("\n")
-            output.flush()
-            os.fsync(output.fileno())
-        os.chmod(candidate_path, stat.S_IMODE(config_path.stat().st_mode))
-        json.loads(candidate_path.read_text())
-        container_config = Path(self.settings.xray_container_config_path)
-        return candidate_path, container_config.with_name(candidate_path.name)
+        return config
 
     async def apply_server_config(self, server) -> None:
         candidate_path, container_candidate = await asyncio.to_thread(

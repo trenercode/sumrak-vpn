@@ -1,4 +1,6 @@
 import asyncio
+import json
+import shlex
 import uuid
 from abc import ABC, abstractmethod
 from datetime import UTC, datetime
@@ -66,6 +68,12 @@ class NodeManager(ABC):
     async def apply_config(self, server: VpnServer) -> None:
         return None
 
+    async def sync_clients(self, server: VpnServer, clients: list[dict]) -> None:
+        return None
+
+    async def health_check(self, server: VpnServer) -> str | None:
+        return None
+
 
 class LocalConfigNodeManager(NodeManager):
     def backend(self, server: VpnServer) -> XrayBackend:
@@ -98,6 +106,123 @@ class ManualNodeManager(NodeManager):
         return None
 
 
+class RemoteConfigNodeManager(NodeManager):
+    def _ssh_command(self, server: VpnServer, remote_command: str) -> list[str]:
+        host = server.ssh_host or server.host or server.public_host
+        if not host or not server.ssh_user:
+            raise RuntimeError("Remote config requires SSH host and user")
+        command = [
+            "ssh",
+            "-o",
+            "BatchMode=yes",
+            "-o",
+            "StrictHostKeyChecking=yes",
+            "-p",
+            str(server.ssh_port or 22),
+        ]
+        if server.ssh_key_path:
+            command.extend(["-i", server.ssh_key_path])
+        command.extend([f"{server.ssh_user}@{host}", remote_command])
+        return command
+
+    async def _ssh(
+        self, server: VpnServer, remote_command: str, stdin: bytes | None = None
+    ) -> tuple[str, str]:
+        process = await asyncio.create_subprocess_exec(
+            *self._ssh_command(server, remote_command),
+            stdin=asyncio.subprocess.PIPE if stdin is not None else None,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, stderr = await process.communicate(stdin)
+        stdout_text = stdout.decode(errors="replace").strip()
+        stderr_text = stderr.decode(errors="replace").strip()
+        if process.returncode:
+            details = "\n".join(
+                part
+                for part in (
+                    f"stdout:\n{stdout_text}" if stdout_text else "",
+                    f"stderr:\n{stderr_text}" if stderr_text else "",
+                )
+                if part
+            )
+            raise RuntimeError(
+                f"Remote command failed (returncode={process.returncode}): {details}"
+            )
+        return stdout_text, stderr_text
+
+    @staticmethod
+    def _paths(server: VpnServer) -> tuple[str, str, str, str]:
+        config_path = server.remote_xray_config_path or server.xray_config_path
+        if not config_path or not config_path.startswith("/"):
+            raise RuntimeError("Remote Xray config path must be absolute")
+        stem, dot, suffix = config_path.rpartition(".")
+        candidate = f"{stem}.candidate.{suffix}" if dot else f"{config_path}.candidate.json"
+        backup = f"{config_path}.backup"
+        compose_dir = server.remote_compose_dir
+        if not compose_dir or not compose_dir.startswith("/"):
+            raise RuntimeError("Remote compose directory must be absolute")
+        return config_path, candidate, backup, compose_dir
+
+    async def activate(self, server: VpnServer, credential: str, client_email: str) -> None:
+        return None
+
+    async def revoke(self, server: VpnServer, client_email: str) -> None:
+        return None
+
+    async def sync_clients(self, server: VpnServer, clients: list[dict]) -> None:
+        config_path, candidate, backup, compose_dir = self._paths(server)
+        current_text, _ = await self._ssh(server, f"cat {shlex.quote(config_path)}")
+        config = json.loads(current_text)
+        rendered = XrayBackend(self.settings).render_server_config(config, server, clients)
+        candidate_bytes = (json.dumps(rendered, ensure_ascii=True, indent=2) + "\n").encode()
+        json.loads(candidate_bytes)
+        await self._ssh(server, f"cat > {shlex.quote(candidate)}", candidate_bytes)
+
+        validation = (
+            "docker run --rm "
+            f"-v {shlex.quote(candidate)}:/etc/xray/config.json:ro "
+            "ghcr.io/xtls/xray-core:latest run -test -config /etc/xray/config.json"
+        )
+        try:
+            await self._ssh(server, validation)
+        except Exception as error:
+            raise RuntimeError(
+                f"{error}; remote candidate kept for diagnostics at {candidate}"
+            ) from error
+
+        restart = (
+            f"cp {shlex.quote(config_path)} {shlex.quote(backup)} && "
+            f"cp {shlex.quote(candidate)} {shlex.quote(config_path)} && "
+            f"cd {shlex.quote(compose_dir)} && docker compose restart"
+        )
+        try:
+            await self._ssh(server, restart)
+        except Exception as error:
+            await self._ssh(
+                server,
+                f"cp {shlex.quote(backup)} {shlex.quote(config_path)} && "
+                f"cd {shlex.quote(compose_dir)} && docker compose restart",
+            )
+            raise RuntimeError(f"Remote Xray rollback completed: {error}") from error
+        await self._ssh(server, f"rm -f {shlex.quote(candidate)}")
+
+    async def apply_config(self, server: VpnServer) -> None:
+        return None
+
+    async def health_check(self, server: VpnServer) -> str | None:
+        container = server.remote_container_name
+        if not container:
+            return "error"
+        try:
+            stdout, _ = await self._ssh(
+                server, f"docker inspect -f '{{{{.State.Running}}}}' {shlex.quote(container)}"
+            )
+            return "online" if stdout == "true" else "offline"
+        except Exception:
+            return "error"
+
+
 class AgentNodeManager(ManualNodeManager):
     """Placeholder for the future sumrak-node-agent integration."""
 
@@ -108,7 +233,8 @@ class NodeManagerRegistry:
         self.managers = {
             "local_config": LocalConfigNodeManager(settings),
             "manual": ManualNodeManager(settings),
-            "ssh_future": ManualNodeManager(settings),
+            "remote_config": RemoteConfigNodeManager(settings),
+            "ssh_future": RemoteConfigNodeManager(settings),
             "agent_future": AgentNodeManager(settings),
         }
 
@@ -127,6 +253,26 @@ class NodeManagerRegistry:
     async def apply_config(self, server: VpnServer) -> None:
         await self.manager(server).apply_config(server)
 
+    async def sync_server(self, session: AsyncSession, server: VpnServer) -> None:
+        profiles = list(
+            await session.scalars(
+                select(DeviceServerProfile).where(
+                    DeviceServerProfile.server_id == server.id,
+                    DeviceServerProfile.is_active.is_(True),
+                )
+            )
+        )
+        clients = [
+            {"id": profile.credential, "email": profile.client_email} for profile in profiles
+        ]
+        await self.manager(server).sync_clients(server, clients)
+
+    async def apply_server(self, session: AsyncSession, server: VpnServer) -> None:
+        if server.management_mode in {"remote_config", "ssh_future"}:
+            await self.sync_server(session, server)
+        else:
+            await self.apply_config(server)
+
     async def health_check(self, server: VpnServer, timeout: float = 5.0) -> str:
         try:
             _, writer = await asyncio.wait_for(
@@ -134,6 +280,9 @@ class NodeManagerRegistry:
             )
             writer.close()
             await writer.wait_closed()
+            managed_status = await self.manager(server).health_check(server)
+            if managed_status is not None:
+                return managed_status
             return "online"
         except (OSError, TimeoutError):
             return "offline"
@@ -219,6 +368,8 @@ async def create_server_profile(
         uri=render_server_uri(server, credential),
     )
     session.add(profile)
+    await session.flush()
+    await nodes.sync_server(session, server)
     return profile
 
 

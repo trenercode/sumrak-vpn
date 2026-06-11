@@ -37,10 +37,26 @@
       <p><strong>Vision (резервный)</strong></p>
       <p><input name="flow" value="xtls-rprx-vision" readonly></p>
     </div>
-    <p><select name="management_mode"><option>manual</option><option>local_config</option><option>ssh_future</option><option>agent_future</option></select>
+    <p><select name="management_mode" data-management-select>
+      <option value="remote_config">Remote config / SSH (рекомендуется для удалённых нод)</option>
+      <option value="manual">Manual: панель НЕ управляет Xray config</option>
+      <option value="local_config">Local config</option>
+      <option value="agent_future">Agent future</option>
+    </select>
     <input name="xray_config_path" placeholder="/data/xray/config.json">
     <input type="number" name="priority" value="100">
     <input type="number" name="max_devices" placeholder="Лимит устройств"></p>
+    <div data-management-section="remote_config">
+      <p><strong>Remote config / SSH</strong></p>
+      <p><input name="ssh_host" placeholder="SSH host">
+      <input type="number" name="ssh_port" value="22">
+      <input name="ssh_user" placeholder="SSH user">
+      <input name="ssh_key_path" placeholder="/run/secrets/remote_xray_key"></p>
+      <p><input name="remote_xray_config_path" placeholder="/opt/xray-fr/config.json">
+      <input name="remote_compose_dir" placeholder="/opt/xray-fr">
+      <input name="remote_container_name" placeholder="xray-fr"></p>
+    </div>
+    <p class="muted" data-management-section="manual" hidden>Manual: панель НЕ управляет Xray config, UUID нужно добавлять вручную.</p>
     <button>Добавить сервер</button>
   </form>
 </div>
@@ -61,6 +77,13 @@
   document.querySelectorAll("[data-transport-select]").forEach((select) => {
     const update = () => document.querySelectorAll("[data-transport-section]").forEach((section) => {
       section.hidden = section.dataset.transportSection !== select.value;
+    });
+    select.addEventListener("change", update);
+    update();
+  });
+  document.querySelectorAll("[data-management-select]").forEach((select) => {
+    const update = () => document.querySelectorAll("[data-management-section]").forEach((section) => {
+      section.hidden = section.dataset.managementSection !== select.value;
     });
     select.addEventListener("change", update);
     update();

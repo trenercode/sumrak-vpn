@@ -259,12 +259,51 @@ docker restart vpn-xray
 Режимы управления:
 
 - `local_config`: приложение изменяет локальный `config.json` и перезапускает `vpn-xray`;
+- `remote_config`: панель по SSH полностью синхронизирует active clients, проверяет
+  candidate-конфиг, применяет его и перезапускает удалённый Docker Compose;
 - `manual`: приложение создает UUID, URI и запись профиля, но администратор вручную
   добавляет UUID/email в конфиг удаленной ноды;
-- `ssh_future` и `agent_future`: зарезервированы под будущую автоматизацию.
+- `ssh_future` является совместимым alias для `remote_config`, `agent_future`
+  зарезервирован под будущую автоматизацию.
 
 Для manual-сервера активные UUID и email видны на странице сервера. После их добавления
 в Xray config ноду нужно перезапустить вручную.
+
+### Remote config / SSH
+
+Для рабочих удалённых нод рекомендуется `management_mode=remote_config`. Контейнеры
+`web` и `bot` должны иметь read-only доступ к отдельному SSH private key, путь внутри
+контейнера указывается в `ssh_key_path`. Добавьте fingerprint удалённой ноды в
+`known_hosts`: SSH запускается с `BatchMode=yes` и `StrictHostKeyChecking=yes`.
+
+При каждой синхронизации панель:
+
+1. читает текущий remote `config.json`, сохраняя его REALITY private key и остальные
+   настройки;
+2. собирает `settings.clients` из всех активных `device_server_profiles` сервера;
+3. загружает `config.candidate.json`;
+4. проверяет candidate через отдельный `ghcr.io/xtls/xray-core:latest`;
+5. создаёт `config.json.backup`, применяет candidate и выполняет `docker compose restart`;
+6. при ошибке возвращает backup. Невалидный candidate остаётся для диагностики.
+
+Пример France:
+
+```text
+public_host: 31.56.146.138
+public_port: 443
+transport: xhttp
+management_mode: remote_config
+remote_xray_config_path: /opt/xray-fr/config.json
+remote_compose_dir: /opt/xray-fr
+remote_container_name: xray-fr
+ssh_host: 31.56.146.138
+ssh_port: 22
+ssh_user: root
+ssh_key_path: /run/secrets/france_xray_key
+```
+
+На удалённой ноде должны быть установлены Docker и Docker Compose, а SSH-пользователь
+должен иметь права читать/писать конфиг и управлять Compose-проектом.
 
 Сервер можно удалить только при отсутствии активных профилей. Выключенный сервер
 исчезает из subscription URL, но существующая Xray-нода и уже выданные прямые URI не

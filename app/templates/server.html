@@ -4,7 +4,7 @@
 <h1>{{ server.name }}</h1>
 {% if config_error %}<div class="card"><strong>Конфиг Xray не применён:</strong> {{ config_error }}</div><br>{% endif %}
 {% if server.management_mode == "manual" %}
-<div class="card"><strong>Внимание:</strong> Этот сервер добавлен вручную. Убедитесь, что пользователь UUID добавлен в Xray config на этой ноде.</div><br>
+<div class="card"><strong>Внимание:</strong> Manual: панель НЕ управляет Xray config, UUID нужно добавлять вручную.</div><br>
 {% endif %}
 <p>Health: {{ server.health_status }} · Последняя проверка: {{ server.last_health_check_at or "—" }} · Устройства: {{ server.current_devices or 0 }}</p>
 <form method="post" action="/admin/servers/{{ server.id }}">
@@ -38,10 +38,25 @@
     <p><strong>Vision (резервный)</strong></p>
     <p><input name="flow" value="{{ server.flow or 'xtls-rprx-vision' }}" readonly></p>
   </div>
-  <p><select name="management_mode">{% for value in ["manual","local_config","ssh_future","agent_future"] %}<option {{ "selected" if server.management_mode == value }}>{{ value }}</option>{% endfor %}</select>
+  <p><select name="management_mode" data-management-select>
+    {% for value, label in [("remote_config","Remote config / SSH (рекомендуется для удалённых нод)"),("manual","Manual: панель НЕ управляет Xray config"),("local_config","Local config"),("agent_future","Agent future")] %}
+    <option value="{{ value }}" {{ "selected" if server.management_mode in ([value] if value != "remote_config" else ["remote_config","ssh_future"]) }}>{{ label }}</option>
+    {% endfor %}
+  </select>
   <input name="xray_config_path" value="{{ server.xray_config_path or '' }}">
   <input type="number" name="priority" value="{{ server.priority }}">
   <input type="number" name="max_devices" value="{{ server.max_devices or '' }}" placeholder="Лимит устройств"></p>
+  <div data-management-section="remote_config">
+    <p><strong>Remote config / SSH</strong></p>
+    <p><input name="ssh_host" value="{{ server.ssh_host or '' }}" placeholder="SSH host">
+    <input type="number" name="ssh_port" value="{{ server.ssh_port or 22 }}">
+    <input name="ssh_user" value="{{ server.ssh_user or '' }}" placeholder="SSH user">
+    <input name="ssh_key_path" value="{{ server.ssh_key_path or '' }}" placeholder="/run/secrets/remote_xray_key"></p>
+    <p><input name="remote_xray_config_path" value="{{ server.remote_xray_config_path or '' }}" placeholder="/opt/xray-fr/config.json">
+    <input name="remote_compose_dir" value="{{ server.remote_compose_dir or '' }}" placeholder="/opt/xray-fr">
+    <input name="remote_container_name" value="{{ server.remote_container_name or '' }}" placeholder="xray-fr"></p>
+  </div>
+  <p class="muted" data-management-section="manual">Manual: панель НЕ управляет Xray config, UUID нужно добавлять вручную.</p>
   <button>Сохранить</button>
 </form>
 <br>
@@ -57,6 +72,13 @@
   document.querySelectorAll("[data-transport-select]").forEach((select) => {
     const update = () => document.querySelectorAll("[data-transport-section]").forEach((section) => {
       section.hidden = section.dataset.transportSection !== select.value;
+    });
+    select.addEventListener("change", update);
+    update();
+  });
+  document.querySelectorAll("[data-management-select]").forEach((select) => {
+    const update = () => document.querySelectorAll("[data-management-section]").forEach((section) => {
+      section.hidden = section.dataset.managementSection !== select.value;
     });
     select.addEventListener("change", update);
     update();

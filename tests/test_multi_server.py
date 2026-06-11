@@ -1,5 +1,6 @@
 import asyncio
 import base64
+import json
 
 from fastapi.testclient import TestClient
 from sqlalchemy import select
@@ -9,7 +10,13 @@ from app.config import Settings
 from app.db import get_session
 from app.main import app
 from app.models import Base, DeviceServerProfile, VpnServer
-from app.nodes import NodeManagerRegistry, check_server_health, ensure_default_server, render_server_uri
+from app.nodes import (
+    NodeManagerRegistry,
+    RemoteConfigNodeManager,
+    check_server_health,
+    ensure_default_server,
+    render_server_uri,
+)
 from app.services import create_device, get_or_create_user, revoke_device, subscription_uris
 
 
@@ -33,6 +40,175 @@ def server(name: str, country: str, priority: int, default: bool = False) -> Vpn
         management_mode="manual",
         is_default=default,
         priority=priority,
+    )
+
+
+def remote_server(transport: str = "xhttp") -> VpnServer:
+    item = server("France", "FR", 10)
+    item.transport = transport
+    item.flow = "" if transport == "xhttp" else "xtls-rprx-vision"
+    item.management_mode = "remote_config"
+    item.ssh_host = "31.56.146.138"
+    item.ssh_port = 22
+    item.ssh_user = "root"
+    item.ssh_key_path = "/run/secrets/france"
+    item.remote_xray_config_path = "/opt/xray-fr/config.json"
+    item.remote_compose_dir = "/opt/xray-fr"
+    item.remote_container_name = "xray-fr"
+    return item
+
+
+def remote_base_config() -> dict:
+    return {
+        "inbounds": [
+            {
+                "tag": "vless-reality",
+                "port": 443,
+                "protocol": "vless",
+                "settings": {"clients": [], "decryption": "none"},
+                "streamSettings": {
+                    "network": "raw",
+                    "security": "reality",
+                    "realitySettings": {
+                        "privateKey": "remote-private-key",
+                        "target": "www.microsoft.com:443",
+                        "serverNames": ["www.microsoft.com"],
+                        "shortIds": ["0123456789abcdef"],
+                    },
+                },
+            }
+        ]
+    }
+
+
+async def test_remote_xhttp_sync_generates_full_config_without_flow():
+    manager = RemoteConfigNodeManager(Settings())
+    item = remote_server()
+    calls = []
+
+    async def ssh(server, command, stdin=None):
+        calls.append((command, stdin))
+        if command.startswith("cat /opt/xray-fr/config.json"):
+            return json.dumps(remote_base_config()), ""
+        return "", ""
+
+    manager._ssh = ssh
+    await manager.sync_clients(item, [{"id": "uuid", "email": "device@test"}])
+    uploaded = json.loads(next(stdin for command, stdin in calls if command.startswith("cat >")))
+    inbound = uploaded["inbounds"][0]
+    assert inbound["settings"]["clients"] == [{"id": "uuid", "email": "device@test"}]
+    assert inbound["streamSettings"]["network"] == "xhttp"
+    assert "flow" not in inbound["settings"]["clients"][0]
+    assert inbound["streamSettings"]["realitySettings"]["privateKey"] == "remote-private-key"
+    assert any("docker run --rm" in command for command, _ in calls)
+    assert any("docker compose restart" in command for command, _ in calls)
+
+
+async def test_remote_vision_sync_adds_flow():
+    manager = RemoteConfigNodeManager(Settings())
+    item = remote_server("vision")
+    uploaded = None
+
+    async def ssh(server, command, stdin=None):
+        nonlocal uploaded
+        if command.startswith("cat /opt/xray-fr/config.json"):
+            return json.dumps(remote_base_config()), ""
+        if command.startswith("cat >"):
+            uploaded = json.loads(stdin)
+        return "", ""
+
+    manager._ssh = ssh
+    await manager.sync_clients(item, [{"id": "uuid", "email": "device@test"}])
+    assert uploaded["inbounds"][0]["settings"]["clients"][0]["flow"] == "xtls-rprx-vision"
+    assert uploaded["inbounds"][0]["streamSettings"]["network"] == "raw"
+
+
+async def test_manual_sync_does_not_call_remote_backend(monkeypatch):
+    nodes = NodeManagerRegistry(Settings())
+    item = server("Manual", "FR", 10)
+
+    async def fail(*args, **kwargs):
+        raise AssertionError("remote backend must not be called")
+
+    monkeypatch.setattr(nodes.managers["remote_config"], "sync_clients", fail)
+    await nodes.managers["manual"].sync_clients(item, [{"id": "uuid", "email": "device@test"}])
+
+
+async def test_remote_config_registry_syncs_active_profiles():
+    engine, sessions = await database()
+    nodes = NodeManagerRegistry(Settings())
+    captured = []
+
+    async def sync_clients(server, clients):
+        captured.extend(clients)
+
+    nodes.managers["remote_config"].sync_clients = sync_clients
+    async with sessions() as session:
+        item = remote_server()
+        session.add(item)
+        await session.flush()
+        session.add(
+            DeviceServerProfile(
+                device_id="device-id",
+                server_id=item.id,
+                credential="active-uuid",
+                client_email="active@test",
+                uri="vless://active",
+                is_active=True,
+            )
+        )
+        await session.flush()
+        await nodes.sync_server(session, item)
+    assert captured == [{"id": "active-uuid", "email": "active@test"}]
+    await engine.dispose()
+
+
+async def test_remote_sync_keeps_candidate_when_validation_fails():
+    manager = RemoteConfigNodeManager(Settings())
+    item = remote_server()
+    calls = []
+
+    async def ssh(server, command, stdin=None):
+        calls.append(command)
+        if command.startswith("cat /opt/xray-fr/config.json"):
+            return json.dumps(remote_base_config()), ""
+        if command.startswith("docker run --rm"):
+            raise RuntimeError("candidate invalid")
+        return "", ""
+
+    manager._ssh = ssh
+    try:
+        await manager.sync_clients(item, [{"id": "uuid", "email": "device@test"}])
+    except RuntimeError as error:
+        assert "/opt/xray-fr/config.candidate.json" in str(error)
+    else:
+        raise AssertionError("sync must fail")
+    assert not any("cp /opt/xray-fr/config.candidate.json" in command for command in calls)
+
+
+async def test_remote_sync_rolls_back_when_restart_fails():
+    manager = RemoteConfigNodeManager(Settings())
+    item = remote_server()
+    calls = []
+
+    async def ssh(server, command, stdin=None):
+        calls.append(command)
+        if command.startswith("cat /opt/xray-fr/config.json"):
+            return json.dumps(remote_base_config()), ""
+        if "cp /opt/xray-fr/config.candidate.json /opt/xray-fr/config.json" in command:
+            raise RuntimeError("restart failed")
+        return "", ""
+
+    manager._ssh = ssh
+    try:
+        await manager.sync_clients(item, [{"id": "uuid", "email": "device@test"}])
+    except RuntimeError as error:
+        assert "rollback completed" in str(error).lower()
+    else:
+        raise AssertionError("sync must fail")
+    assert any(
+        command.startswith("cp /opt/xray-fr/config.json.backup /opt/xray-fr/config.json")
+        for command in calls
     )
 
 
@@ -134,6 +310,16 @@ async def test_health_check_online_and_offline(monkeypatch):
         await session.commit()
         assert await check_server_health(session, online, nodes) == "online"
         assert await check_server_health(session, offline, nodes) == "offline"
+
+        remote = remote_server()
+        session.add(remote)
+        await session.commit()
+
+        async def remote_health(server):
+            return "online"
+
+        nodes.managers["remote_config"].health_check = remote_health
+        assert await check_server_health(session, remote, nodes) == "online"
     await engine.dispose()
 
 

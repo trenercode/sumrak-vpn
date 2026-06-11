@@ -189,6 +189,13 @@ async def server_create(
     xhttp_mode: str = Form("auto"),
     management_mode: str = Form("manual"),
     xray_config_path: str = Form(""),
+    ssh_host: str = Form(""),
+    ssh_port: int = Form(22),
+    ssh_user: str = Form(""),
+    ssh_key_path: str = Form(""),
+    remote_xray_config_path: str = Form(""),
+    remote_compose_dir: str = Form(""),
+    remote_container_name: str = Form(""),
     priority: int = Form(100),
     max_devices: str = Form(""),
     session: AsyncSession = Depends(get_session),
@@ -212,12 +219,22 @@ async def server_create(
             xhttp_mode=xhttp_mode or "auto",
             management_mode=management_mode,
             xray_config_path=xray_config_path or None,
+            ssh_host=ssh_host or None,
+            ssh_port=ssh_port,
+            ssh_user=ssh_user or None,
+            ssh_key_path=ssh_key_path or None,
+            remote_xray_config_path=remote_xray_config_path or None,
+            remote_compose_dir=remote_compose_dir or None,
+            remote_container_name=remote_container_name or None,
             priority=priority,
             max_devices=int(max_devices) if max_devices else None,
         )
+    session.add(item)
+    await session.flush()
     try:
-        await node_registry(request).apply_config(item)
+        await node_registry(request).apply_server(session, item)
     except Exception as error:
+        await session.rollback()
         items = list(
             await session.scalars(select(VpnServer).order_by(VpnServer.priority, VpnServer.name))
         )
@@ -227,7 +244,6 @@ async def server_create(
             {"servers": items, "config_error": str(error)},
             status_code=400,
         )
-    session.add(item)
     await session.commit()
     return RedirectResponse("/admin/servers", status_code=303)
 
@@ -280,6 +296,13 @@ async def server_update(
     xhttp_mode: str = Form("auto"),
     management_mode: str = Form("manual"),
     xray_config_path: str = Form(""),
+    ssh_host: str = Form(""),
+    ssh_port: int = Form(22),
+    ssh_user: str = Form(""),
+    ssh_key_path: str = Form(""),
+    remote_xray_config_path: str = Form(""),
+    remote_compose_dir: str = Form(""),
+    remote_container_name: str = Form(""),
     priority: int = Form(100),
     max_devices: str = Form(""),
     session: AsyncSession = Depends(get_session),
@@ -306,12 +329,19 @@ async def server_update(
         "xhttp_mode": xhttp_mode or "auto",
         "management_mode": management_mode,
         "xray_config_path": xray_config_path or None,
+        "ssh_host": ssh_host or None,
+        "ssh_port": ssh_port,
+        "ssh_user": ssh_user or None,
+        "ssh_key_path": ssh_key_path or None,
+        "remote_xray_config_path": remote_xray_config_path or None,
+        "remote_compose_dir": remote_compose_dir or None,
+        "remote_container_name": remote_container_name or None,
         "priority": priority,
         "max_devices": int(max_devices) if max_devices else None,
     }.items():
         setattr(server, field, value)
     try:
-        await node_registry(request).apply_config(server)
+        await node_registry(request).apply_server(session, server)
     except Exception as error:
         await session.rollback()
         server = await session.get(VpnServer, server_id)
