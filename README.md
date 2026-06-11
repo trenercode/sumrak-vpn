@@ -65,6 +65,53 @@ python -m app.bot
 
 Админка: `http://127.0.0.1:8000/admin`.
 
+## Staging deployment
+
+Staging запускается отдельным Compose-стеком из `/opt/sumrak-vpn-test` и не использует
+production `.env`, базу, контейнеры или Xray-конфиг. `compose.staging.yaml` принудительно
+использует отдельную БД `vpn_test`, bridge-network и `VPN_BACKEND=mock`. В staging нет
+монтирования `/var/run/docker.sock`, `deploy/xray` и production Xray-контейнера.
+
+```bash
+cd /opt/sumrak-vpn-test
+git checkout feature/...
+cp .env.staging.example .env
+# Заполните отдельные BOT_TOKEN, BOT_USERNAME и ADMIN_PASSWORD
+docker compose -f compose.staging.yaml up -d --build
+docker compose -f compose.staging.yaml ps
+curl http://127.0.0.1:8001/health
+```
+
+Изолированные ресурсы staging:
+
+- web: `sumrak-vpn-test-web`, локальный порт `127.0.0.1:8001`;
+- bot: `sumrak-vpn-test-bot`, использует только отдельный test bot token;
+- db: `sumrak-vpn-test-db`, БД `vpn_test`, локальный порт `127.0.0.1:5433`;
+- migrate: `sumrak-vpn-test-migrate`;
+- volume: `sumrak-vpn-test-postgres-data`;
+- network: `sumrak-vpn-test-network`.
+
+Настройте reverse proxy для `test.sumrak.digital` на `http://127.0.0.1:8001` и выпустите
+отдельный TLS-сертификат. Production `panel.sumrak.digital` продолжает проксироваться на
+порт `8000`.
+
+Перед каждым запуском убедитесь, что `/opt/sumrak-vpn-test/.env` содержит отдельный
+тестовый `BOT_TOKEN`. Не копируйте `/opt/sumrak-vpn/.env` и не запускайте staging через
+production `compose.yaml`.
+
+Управление стеком:
+
+```bash
+docker compose -f compose.staging.yaml logs -f web bot
+docker compose -f compose.staging.yaml down
+# Удаляет только staging-БД; используйте лишь когда тестовые данные больше не нужны:
+docker compose -f compose.staging.yaml down -v
+```
+
+Для тестирования реального VLESS/REALITY/XHTTP добавьте отдельную manual-ноду через
+staging-админку. Не указывайте production-ноду и не переключайте staging на
+`local_config`.
+
 ## Telegram Web App
 
 Главное меню бота содержит кнопку «🌑 Открыть Sumrak VPN». Она открывает мобильный
@@ -216,6 +263,49 @@ Xray-ноды работают независимо от Telegram-бота, ад
 Будущий `sumrak-node-agent` подключится через интерфейс `NodeManager`; заготовки
 `LocalConfigNodeManager`, `ManualNodeManager` и `AgentNodeManager` уже разделяют способы
 управления нодами.
+
+### Vision и XHTTP
+
+В `/admin/servers` транспорт переключается между:
+
+- **Быстрый режим: Vision**: Xray inbound получает актуальный RAW-транспорт
+  (`network: raw`), клиенты получают `flow: xtls-rprx-vision`, а subscription URI
+  содержит совместимый клиентский параметр `type=tcp`;
+- **Стабильный режим: XHTTP**: Xray inbound получает `network: xhttp` и
+  `xhttpSettings` (`path` и `mode`), а `flow` удаляется из клиентов и subscription URI.
+
+Для `local_config` приложение не заменяет рабочий конфиг сразу. Оно создаёт рядом
+`config.json.candidate`, запускает в контейнере:
+
+```bash
+xray run -test -config /etc/xray/config.json.candidate
+```
+
+После успешной проверки текущий файл сохраняется как `config.json.backup`, candidate
+применяется и контейнер перезапускается. Если контейнер не запустился, приложение
+возвращает backup и повторно запускает Xray. Список `settings.clients`, UUID и закрытый
+REALITY-ключ при переключении транспорта сохраняются.
+
+### Staging-проверка XHTTP
+
+Переключение сначала проверяйте только на `test.sumrak.digital` с отдельными БД,
+Telegram-ботом, Xray-контейнером и Reality-ключами. Не подключайте production
+`deploy/xray/config.json` к staging-контейнерам.
+
+1. Запустите изолированный staging через `compose.staging.yaml`.
+2. В `/admin/servers` добавьте ноду с `management_mode=manual` и транспортом XHTTP,
+   проверьте subscription URI без изменения Xray.
+3. Поднимите отдельный staging Xray и добавьте ноду `local_config`, указав путь к его
+   config. Переключите её в «Стабильный режим: XHTTP».
+4. Убедитесь, что админка показала успешное сохранение, `config.json.backup` создан,
+   а staging Xray работает.
+5. Создайте новое устройство через staging Telegram-бота и проверьте импорт subscription
+   URL в Hiddify, v2rayN, Nekoray и Happ.
+6. Проверьте Vision и XHTTP на Instagram/Reels/YouTube, затем отдельно проверьте rollback
+   заведомо невалидного staging-конфига.
+
+Автоматические тесты проверяют структуру Vision/XHTTP URI, сохранение клиентов и rollback.
+Импорт и качество трафика в конкретных клиентах остаются обязательным ручным staging-тестом.
 
 ## Техподдержка
 

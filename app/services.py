@@ -23,6 +23,7 @@ from app.nodes import (
     active_servers,
     create_server_profile,
     ensure_default_server,
+    render_server_uri,
 )
 from app.vpn import new_client_email
 
@@ -325,18 +326,20 @@ async def subscription_uris(
         return []
     await ensure_device_profiles(session, device, settings, nodes)
     profiles = list(
-        await session.scalars(
-            select(DeviceServerProfile)
-            .join(VpnServer)
-            .where(
-                DeviceServerProfile.device_id == device.id,
-                DeviceServerProfile.is_active.is_(True),
-                VpnServer.is_active.is_(True),
+        (
+            await session.execute(
+                select(DeviceServerProfile, VpnServer)
+                .join(VpnServer)
+                .where(
+                    DeviceServerProfile.device_id == device.id,
+                    DeviceServerProfile.is_active.is_(True),
+                    VpnServer.is_active.is_(True),
+                )
+                .order_by(VpnServer.priority, VpnServer.name)
             )
-            .order_by(VpnServer.priority, VpnServer.name)
-        )
+        ).all()
     )
-    return [profile.uri for profile in profiles]
+    return [render_server_uri(server, profile.credential) for profile, server in profiles]
 
 
 async def referral_stats(session: AsyncSession, user: User) -> dict:

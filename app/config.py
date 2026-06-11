@@ -23,6 +23,7 @@ class Settings(BaseSettings):
     xray_api_address: str = "127.0.0.1:10085"
     xray_inbound_tag: str = "vless-reality"
     xray_config_path: str = "/data/xray/config.json"
+    xray_container_config_path: str = "/etc/xray/config.json"
     xray_container_name: str = "vpn-xray"
     docker_socket_path: str = "/var/run/docker.sock"
     xray_public_host: str = ""

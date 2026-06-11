@@ -170,6 +170,7 @@ async def servers(request: Request, session: AsyncSession = Depends(get_session)
 
 @router.post("/servers", dependencies=[Depends(require_admin)])
 async def server_create(
+    request: Request,
     name: str = Form(...),
     country_code: str = Form(""),
     country_name: str = Form(""),
@@ -179,18 +180,20 @@ async def server_create(
     public_port: int = Form(8443),
     reality_public_key: str = Form(...),
     reality_short_id: str = Form(...),
+    reality_target: str = Form("www.microsoft.com:443"),
     reality_server_name: str = Form("www.microsoft.com"),
     fingerprint: str = Form("chrome"),
     flow: str = Form("xtls-rprx-vision"),
-    transport: str = Form("raw"),
+    transport: str = Form("vision"),
+    xhttp_path: str = Form("/"),
+    xhttp_mode: str = Form("auto"),
     management_mode: str = Form("manual"),
     xray_config_path: str = Form(""),
     priority: int = Form(100),
     max_devices: str = Form(""),
     session: AsyncSession = Depends(get_session),
 ):
-    session.add(
-        VpnServer(
+    item = VpnServer(
             name=name,
             country_code=country_code.upper(),
             country_name=country_name,
@@ -200,16 +203,31 @@ async def server_create(
             public_port=public_port,
             reality_public_key=reality_public_key,
             reality_short_id=reality_short_id,
+            reality_target=reality_target,
             reality_server_name=reality_server_name,
             fingerprint=fingerprint,
-            flow=flow,
+            flow="" if transport == "xhttp" else flow,
             transport=transport,
+            xhttp_path=xhttp_path or "/",
+            xhttp_mode=xhttp_mode or "auto",
             management_mode=management_mode,
             xray_config_path=xray_config_path or None,
             priority=priority,
             max_devices=int(max_devices) if max_devices else None,
         )
-    )
+    try:
+        await node_registry(request).apply_config(item)
+    except Exception as error:
+        items = list(
+            await session.scalars(select(VpnServer).order_by(VpnServer.priority, VpnServer.name))
+        )
+        return templates(request).TemplateResponse(
+            request,
+            "servers.html",
+            {"servers": items, "config_error": str(error)},
+            status_code=400,
+        )
+    session.add(item)
     await session.commit()
     return RedirectResponse("/admin/servers", status_code=303)
 
@@ -242,6 +260,7 @@ async def server_detail(
 
 @router.post("/servers/{server_id}", dependencies=[Depends(require_admin)])
 async def server_update(
+    request: Request,
     server_id: str,
     name: str = Form(...),
     country_code: str = Form(""),
@@ -252,10 +271,13 @@ async def server_update(
     public_port: int = Form(8443),
     reality_public_key: str = Form(...),
     reality_short_id: str = Form(...),
+    reality_target: str = Form("www.microsoft.com:443"),
     reality_server_name: str = Form("www.microsoft.com"),
     fingerprint: str = Form("chrome"),
     flow: str = Form("xtls-rprx-vision"),
-    transport: str = Form("raw"),
+    transport: str = Form("vision"),
+    xhttp_path: str = Form("/"),
+    xhttp_mode: str = Form("auto"),
     management_mode: str = Form("manual"),
     xray_config_path: str = Form(""),
     priority: int = Form(100),
@@ -275,16 +297,41 @@ async def server_update(
         "public_port": public_port,
         "reality_public_key": reality_public_key,
         "reality_short_id": reality_short_id,
+        "reality_target": reality_target,
         "reality_server_name": reality_server_name,
         "fingerprint": fingerprint,
-        "flow": flow,
+        "flow": "" if transport == "xhttp" else flow,
         "transport": transport,
+        "xhttp_path": xhttp_path or "/",
+        "xhttp_mode": xhttp_mode or "auto",
         "management_mode": management_mode,
         "xray_config_path": xray_config_path or None,
         "priority": priority,
         "max_devices": int(max_devices) if max_devices else None,
     }.items():
         setattr(server, field, value)
+    try:
+        await node_registry(request).apply_config(server)
+    except Exception as error:
+        await session.rollback()
+        server = await session.get(VpnServer, server_id)
+        profiles = list(
+            await session.scalars(
+                select(DeviceServerProfile)
+                .where(
+                    DeviceServerProfile.server_id == server_id,
+                    DeviceServerProfile.is_active.is_(True),
+                )
+                .order_by(DeviceServerProfile.created_at.desc())
+                .limit(200)
+            )
+        )
+        return templates(request).TemplateResponse(
+            request,
+            "server.html",
+            {"server": server, "profiles": profiles, "config_error": str(error)},
+            status_code=400,
+        )
     await session.commit()
     return RedirectResponse(f"/admin/servers/{server_id}", status_code=303)
 

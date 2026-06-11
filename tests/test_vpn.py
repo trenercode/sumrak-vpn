@@ -1,5 +1,6 @@
 import asyncio
 import json
+from types import SimpleNamespace
 
 from app.config import Settings
 from app.vpn import MockVpnBackend, XrayBackend
@@ -118,3 +119,152 @@ async def test_restart_xray_uses_docker_socket(monkeypatch):
     monkeypatch.setattr(asyncio, "open_unix_connection", open_socket)
     await XrayBackend(Settings(xray_container_name="vpn-xray"))._restart_xray()
     assert writer.request.startswith(b"POST /containers/vpn-xray/restart?t=10 HTTP/1.1\r\n")
+
+
+def test_build_xhttp_config_preserves_clients_and_removes_flow(tmp_path):
+    config = xray_config()
+    config["inbounds"][0]["settings"]["clients"] = [
+        {"id": "existing-uuid", "email": "existing@test", "flow": "xtls-rprx-vision"}
+    ]
+    config["inbounds"][0]["streamSettings"] = {
+        "network": "tcp",
+        "security": "reality",
+        "realitySettings": {"privateKey": "keep-private-key"},
+    }
+    config_path = tmp_path / "config.json"
+    config_path.write_text(json.dumps(config))
+    backend = XrayBackend(Settings(xray_config_path=str(config_path)))
+    server = SimpleNamespace(
+        transport="xhttp",
+        flow="",
+        public_port=8443,
+        xhttp_path="/sumrak",
+        xhttp_mode="auto",
+        reality_target="www.microsoft.com:443",
+        reality_server_name="www.microsoft.com",
+        reality_short_id="0123456789abcdef",
+    )
+
+    candidate, _ = backend._build_server_config(server)
+    result = json.loads(candidate.read_text())
+    inbound = result["inbounds"][0]
+    assert inbound["settings"]["clients"] == [{"id": "existing-uuid", "email": "existing@test"}]
+    assert inbound["streamSettings"]["network"] == "xhttp"
+    assert inbound["streamSettings"]["xhttpSettings"] == {"path": "/sumrak", "mode": "auto"}
+    assert inbound["streamSettings"]["realitySettings"]["privateKey"] == "keep-private-key"
+
+
+def test_build_vision_config_uses_raw_and_preserves_clients(tmp_path):
+    config = xray_config()
+    config["inbounds"][0]["settings"]["clients"] = [
+        {"id": "existing-uuid", "email": "existing@test"}
+    ]
+    config["inbounds"][0]["streamSettings"] = {
+        "network": "xhttp",
+        "security": "reality",
+        "xhttpSettings": {"path": "/old", "mode": "auto"},
+        "realitySettings": {"privateKey": "keep-private-key"},
+    }
+    config_path = tmp_path / "config.json"
+    config_path.write_text(json.dumps(config))
+    backend = XrayBackend(Settings(xray_config_path=str(config_path)))
+    server = SimpleNamespace(
+        transport="vision",
+        flow="xtls-rprx-vision",
+        public_port=8443,
+        xhttp_path="/",
+        xhttp_mode="auto",
+        reality_target="www.microsoft.com:443",
+        reality_server_name="www.microsoft.com",
+        reality_short_id="0123456789abcdef",
+    )
+
+    candidate, _ = backend._build_server_config(server)
+    inbound = json.loads(candidate.read_text())["inbounds"][0]
+    assert inbound["settings"]["clients"][0]["flow"] == "xtls-rprx-vision"
+    assert inbound["streamSettings"]["network"] == "raw"
+    assert "xhttpSettings" not in inbound["streamSettings"]
+
+
+async def test_apply_server_config_rolls_back_when_xray_does_not_start(tmp_path):
+    config_path = tmp_path / "config.json"
+    original = xray_config()
+    original["inbounds"][0]["streamSettings"] = {
+        "network": "tcp",
+        "security": "reality",
+        "realitySettings": {"privateKey": "keep-private-key"},
+    }
+    config_path.write_text(json.dumps(original))
+    backend = XrayBackend(Settings(xray_config_path=str(config_path)))
+    server = SimpleNamespace(
+        transport="xhttp",
+        flow="",
+        public_port=8443,
+        xhttp_path="/",
+        xhttp_mode="auto",
+        reality_target="www.microsoft.com:443",
+        reality_server_name="www.microsoft.com",
+        reality_short_id="0123456789abcdef",
+    )
+    restarts = []
+
+    async def test_config(path):
+        assert path.endswith("config.json.candidate")
+
+    async def restart():
+        restarts.append(True)
+
+    async def not_running():
+        raise RuntimeError("not running")
+
+    backend._test_xray_config = test_config
+    backend._restart_xray = restart
+    backend._ensure_xray_running = not_running
+
+    try:
+        await backend.apply_server_config(server)
+    except RuntimeError:
+        pass
+    else:
+        raise AssertionError("apply_server_config must fail")
+
+    assert json.loads(config_path.read_text()) == original
+    assert (tmp_path / "config.json.backup").exists()
+    assert restarts == [True, True]
+
+
+async def test_apply_server_config_keeps_working_config_when_validation_fails(tmp_path):
+    config_path = tmp_path / "config.json"
+    original = xray_config()
+    original["inbounds"][0]["streamSettings"] = {
+        "network": "raw",
+        "security": "reality",
+        "realitySettings": {"privateKey": "keep-private-key"},
+    }
+    config_path.write_text(json.dumps(original))
+    backend = XrayBackend(Settings(xray_config_path=str(config_path)))
+    server = SimpleNamespace(
+        transport="xhttp",
+        flow="",
+        public_port=8443,
+        xhttp_path="/",
+        xhttp_mode="auto",
+        reality_target="www.microsoft.com:443",
+        reality_server_name="www.microsoft.com",
+        reality_short_id="0123456789abcdef",
+    )
+
+    async def reject_config(path):
+        raise RuntimeError("invalid config")
+
+    backend._test_xray_config = reject_config
+
+    try:
+        await backend.apply_server_config(server)
+    except RuntimeError:
+        pass
+    else:
+        raise AssertionError("apply_server_config must fail")
+
+    assert json.loads(config_path.read_text()) == original
+    assert not (tmp_path / "config.json.backup").exists()

@@ -2,6 +2,7 @@
 {% block title %}VPN-серверы — Sumrak VPN{% endblock %}
 {% block content %}
 <h1>VPN-серверы</h1>
+{% if config_error %}<div class="card"><strong>Конфиг Xray не применён:</strong> {{ config_error }}</div><br>{% endif %}
 <div class="card">
   <h2>Добавить сервер</h2>
   <form method="post" action="/admin/servers">
@@ -14,10 +15,15 @@
     <input type="number" name="public_port" value="8443"></p>
     <p><input name="reality_public_key" placeholder="Reality public key" required>
     <input name="reality_short_id" placeholder="shortId" required>
+    <input name="reality_target" value="www.microsoft.com:443" placeholder="REALITY target"></p>
+    <p>
     <input name="reality_server_name" value="www.microsoft.com"></p>
-    <p><input name="fingerprint" value="chrome">
+    <p><select name="fingerprint">{% for value in ["chrome","firefox","edge","safari","randomized"] %}<option>{{ value }}</option>{% endfor %}</select>
     <input name="flow" value="xtls-rprx-vision">
-    <select name="transport"><option>raw</option><option>tcp</option><option>xhttp</option></select></p>
+    <select name="transport"><option value="vision">Быстрый режим: Vision</option><option value="xhttp">Стабильный режим: XHTTP</option></select></p>
+    <p class="muted">XHTTP предназначен для тестов стабильности Instagram/Reels/YouTube и работает без flow.</p>
+    <p><input name="xhttp_path" value="/" placeholder="XHTTP path">
+    <select name="xhttp_mode"><option>auto</option><option>packet-up</option><option>stream-up</option><option>stream-one</option></select></p>
     <p><select name="management_mode"><option>manual</option><option>local_config</option><option>ssh_future</option><option>agent_future</option></select>
     <input name="xray_config_path" placeholder="/data/xray/config.json">
     <input type="number" name="priority" value="100">
@@ -31,7 +37,7 @@
   {% for server in servers %}
   <tr>
     <td><a href="/admin/servers/{{ server.id }}">{{ server.name }}</a><br><span class="muted">{{ server.country_name }} {{ server.city }} · {{ server.public_host }}:{{ server.public_port }}</span></td>
-    <td>{{ server.management_mode }}</td><td>{{ server.priority }}</td>
+    <td>{{ server.management_mode }} · {{ "Vision" if server.transport in ["vision","raw","tcp"] else "XHTTP" }}</td><td>{{ server.priority }}</td>
     <td>{{ server.current_devices or 0 }}{% if server.max_devices %}/{{ server.max_devices }}{% endif %}</td>
     <td>{{ server.health_status }}</td>
     <td>{{ "default · " if server.is_default else "" }}{{ "активен" if server.is_active else "выключен" }}</td>

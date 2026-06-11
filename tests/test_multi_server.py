@@ -74,6 +74,20 @@ def test_render_uri_uses_server_specific_reality_settings():
     assert "Germany" in uri
 
 
+def test_render_uri_uses_xhttp_without_vision_flow():
+    item = server("XHTTP", "DE", 10)
+    item.transport = "xhttp"
+    item.flow = ""
+    item.xhttp_path = "/sumrak"
+    item.xhttp_mode = "auto"
+    uri = render_server_uri(item, "11111111-1111-1111-1111-111111111111")
+    assert "type=xhttp" in uri
+    assert "path=%2Fsumrak" in uri
+    assert "mode=auto" in uri
+    assert "flow=" not in uri
+    assert "headerType=" not in uri
+
+
 async def test_health_check_online_and_offline(monkeypatch):
     engine, sessions = await database()
     nodes = NodeManagerRegistry(Settings())

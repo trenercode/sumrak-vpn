@@ -1,0 +1,80 @@
+name: sumrak-vpn-test
+
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: sumrak-vpn-test-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: vpn_test
+      POSTGRES_USER: vpn_test
+      POSTGRES_PASSWORD: vpn_test_change_me
+    volumes:
+      - staging_postgres_data:/var/lib/postgresql/data
+    ports:
+      - "127.0.0.1:5433:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U vpn_test -d vpn_test"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    networks:
+      - staging
+
+  migrate:
+    build: .
+    container_name: sumrak-vpn-test-migrate
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://vpn_test:vpn_test_change_me@db:5432/vpn_test
+      VPN_BACKEND: mock
+    command: alembic upgrade head
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - staging
+
+  web:
+    build: .
+    container_name: sumrak-vpn-test-web
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://vpn_test:vpn_test_change_me@db:5432/vpn_test
+      VPN_BACKEND: mock
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000
+    ports:
+      - "127.0.0.1:8001:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    networks:
+      - staging
+
+  bot:
+    build: .
+    container_name: sumrak-vpn-test-bot
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://vpn_test:vpn_test_change_me@db:5432/vpn_test
+      VPN_BACKEND: mock
+    command: python -m app.bot
+    depends_on:
+      db:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    networks:
+      - staging
+
+volumes:
+  staging_postgres_data:
+    name: sumrak-vpn-test-postgres-data
+
+networks:
+  staging:
+    name: sumrak-vpn-test-network

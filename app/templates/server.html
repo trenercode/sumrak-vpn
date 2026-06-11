@@ -2,6 +2,7 @@
 {% block title %}{{ server.name }} — VPN-сервер{% endblock %}
 {% block content %}
 <h1>{{ server.name }}</h1>
+{% if config_error %}<div class="card"><strong>Конфиг Xray не применён:</strong> {{ config_error }}</div><br>{% endif %}
 {% if server.management_mode == "manual" %}
 <div class="card"><strong>Внимание:</strong> Этот сервер добавлен вручную. Убедитесь, что пользователь UUID добавлен в Xray config на этой ноде.</div><br>
 {% endif %}
@@ -16,10 +17,15 @@
   <input type="number" name="public_port" value="{{ server.public_port }}"></p>
   <p><input name="reality_public_key" value="{{ server.reality_public_key }}" required>
   <input name="reality_short_id" value="{{ server.reality_short_id }}" required>
+  <input name="reality_target" value="{{ server.reality_target }}" placeholder="REALITY target"></p>
+  <p>
   <input name="reality_server_name" value="{{ server.reality_server_name }}"></p>
-  <p><input name="fingerprint" value="{{ server.fingerprint }}">
+  <p><select name="fingerprint">{% for value in ["chrome","firefox","edge","safari","randomized"] %}<option {{ "selected" if server.fingerprint == value }}>{{ value }}</option>{% endfor %}</select>
   <input name="flow" value="{{ server.flow }}">
-  <select name="transport">{% for value in ["raw","tcp","xhttp"] %}<option {{ "selected" if server.transport == value }}>{{ value }}</option>{% endfor %}</select></p>
+  <select name="transport"><option value="vision" {{ "selected" if server.transport in ["vision","raw","tcp"] }}>Быстрый режим: Vision</option><option value="xhttp" {{ "selected" if server.transport == "xhttp" }}>Стабильный режим: XHTTP</option></select></p>
+  <p class="muted">XHTTP предназначен для тестов стабильности Instagram/Reels/YouTube и работает без flow.</p>
+  <p><input name="xhttp_path" value="{{ server.xhttp_path }}" placeholder="XHTTP path">
+  <select name="xhttp_mode">{% for value in ["auto","packet-up","stream-up","stream-one"] %}<option {{ "selected" if server.xhttp_mode == value }}>{{ value }}</option>{% endfor %}</select></p>
   <p><select name="management_mode">{% for value in ["manual","local_config","ssh_future","agent_future"] %}<option {{ "selected" if server.management_mode == value }}>{{ value }}</option>{% endfor %}</select>
   <input name="xray_config_path" value="{{ server.xray_config_path or '' }}">
   <input type="number" name="priority" value="{{ server.priority }}">

@@ -3,6 +3,7 @@ import fcntl
 import json
 import os
 import secrets
+import shutil
 import stat
 import uuid
 from dataclasses import dataclass
@@ -114,11 +115,9 @@ class XrayBackend(VpnBackend):
             else:
                 if credential is None:
                     raise ValueError("credential is required when adding an Xray client")
-                desired = {
-                    "id": credential,
-                    "email": client_email,
-                    "flow": self.settings.xray_flow,
-                }
+                desired = {"id": credential, "email": client_email}
+                if self.settings.xray_flow:
+                    desired["flow"] = self.settings.xray_flow
                 if existing == desired:
                     return False
                 if existing is None:
@@ -137,27 +136,134 @@ class XrayBackend(VpnBackend):
             os.replace(temporary_path, config_path)
             return True
 
-    async def _restart_xray(self) -> None:
+    async def _docker_request(
+        self, method: str, path: str, payload: dict | None = None
+    ) -> tuple[bytes, bytes]:
         reader, writer = await asyncio.open_unix_connection(self.settings.docker_socket_path)
-        path = f"/containers/{quote(self.settings.xray_container_name, safe='')}/restart?t=10"
+        body = json.dumps(payload).encode() if payload is not None else b""
         writer.write(
             (
-                f"POST {path} HTTP/1.1\r\n"
+                f"{method} {path} HTTP/1.1\r\n"
                 "Host: docker\r\n"
-                "Content-Length: 0\r\n"
+                "Content-Type: application/json\r\n"
+                f"Content-Length: {len(body)}\r\n"
                 "Connection: close\r\n\r\n"
             ).encode()
+            + body
         )
         await writer.drain()
         status_line = await reader.readline()
         response = await reader.read()
         writer.close()
         await writer.wait_closed()
+        return status_line, response.split(b"\r\n\r\n", 1)[-1]
+
+    async def _restart_xray(self) -> None:
+        path = f"/containers/{quote(self.settings.xray_container_name, safe='')}/restart?t=10"
+        status_line, response = await self._docker_request("POST", path)
         if b" 204 " not in status_line:
             raise RuntimeError(
                 f"Failed to restart Xray container: {status_line.decode().strip()} "
                 f"{response.decode(errors='replace').strip()}"
             )
+
+    async def _test_xray_config(self, container_path: str) -> None:
+        container = quote(self.settings.xray_container_name, safe="")
+        status_line, response = await self._docker_request(
+            "POST",
+            f"/containers/{container}/exec",
+            {
+                "AttachStdout": True,
+                "AttachStderr": True,
+                "Tty": True,
+                "Cmd": ["xray", "run", "-test", "-config", container_path],
+            },
+        )
+        if b" 201 " not in status_line:
+            raise RuntimeError(f"Could not create Xray config test: {response.decode(errors='replace')}")
+        exec_id = json.loads(response)["Id"]
+        status_line, output = await self._docker_request(
+            "POST", f"/exec/{quote(exec_id, safe='')}/start", {"Detach": False, "Tty": True}
+        )
+        if b" 200 " not in status_line:
+            raise RuntimeError(f"Could not run Xray config test: {output.decode(errors='replace')}")
+        _, inspection = await self._docker_request("GET", f"/exec/{quote(exec_id, safe='')}/json")
+        if json.loads(inspection).get("ExitCode") != 0:
+            raise RuntimeError(f"Xray rejected config: {output.decode(errors='replace').strip()}")
+
+    async def _ensure_xray_running(self) -> None:
+        container = quote(self.settings.xray_container_name, safe="")
+        status_line, response = await self._docker_request("GET", f"/containers/{container}/json")
+        if b" 200 " not in status_line or not json.loads(response).get("State", {}).get("Running"):
+            raise RuntimeError("Xray container did not start after config update")
+
+    def _build_server_config(self, server) -> tuple[Path, Path]:
+        config_path = Path(self.settings.xray_config_path)
+        config = json.loads(config_path.read_text())
+        inbound = next(
+            (
+                item
+                for item in config.get("inbounds", [])
+                if item.get("tag") == self.settings.xray_inbound_tag
+            ),
+            None,
+        )
+        if inbound is None:
+            raise RuntimeError(f"Xray inbound {self.settings.xray_inbound_tag!r} not found")
+
+        is_xhttp = server.transport == "xhttp"
+        clients = inbound.setdefault("settings", {}).setdefault("clients", [])
+        for client in clients:
+            if is_xhttp:
+                client.pop("flow", None)
+            else:
+                client["flow"] = server.flow or "xtls-rprx-vision"
+
+        inbound["port"] = server.public_port
+        stream = inbound.setdefault("streamSettings", {})
+        stream["network"] = "xhttp" if is_xhttp else "raw"
+        stream["security"] = "reality"
+        if is_xhttp:
+            stream["xhttpSettings"] = {
+                "path": server.xhttp_path or "/",
+                "mode": server.xhttp_mode or "auto",
+            }
+        else:
+            stream.pop("xhttpSettings", None)
+        reality = stream.setdefault("realitySettings", {})
+        reality["target"] = server.reality_target
+        reality["serverNames"] = [server.reality_server_name]
+        reality["shortIds"] = [server.reality_short_id]
+
+        candidate_path = config_path.with_suffix(f"{config_path.suffix}.candidate")
+        with candidate_path.open("w") as output:
+            json.dump(config, output, ensure_ascii=True, indent=2)
+            output.write("\n")
+            output.flush()
+            os.fsync(output.fileno())
+        os.chmod(candidate_path, stat.S_IMODE(config_path.stat().st_mode))
+        container_config = Path(self.settings.xray_container_config_path)
+        return candidate_path, container_config.with_name(candidate_path.name)
+
+    async def apply_server_config(self, server) -> None:
+        candidate_path, container_candidate = await asyncio.to_thread(
+            self._build_server_config, server
+        )
+        config_path = Path(self.settings.xray_config_path)
+        backup_path = config_path.with_suffix(f"{config_path.suffix}.backup")
+        try:
+            await self._test_xray_config(str(container_candidate))
+            await asyncio.to_thread(shutil.copy2, config_path, backup_path)
+            await asyncio.to_thread(os.replace, candidate_path, config_path)
+            try:
+                await self._restart_xray()
+                await self._ensure_xray_running()
+            except Exception:
+                await asyncio.to_thread(shutil.copy2, backup_path, config_path)
+                await self._restart_xray()
+                raise
+        finally:
+            candidate_path.unlink(missing_ok=True)
 
     async def _grpc(self, method: str, payload: dict) -> dict:
         process = await asyncio.create_subprocess_exec(

@@ -27,20 +27,21 @@ def server_label(server: VpnServer) -> str:
 
 
 def render_server_uri(server: VpnServer, credential: str) -> str:
-    transport = "tcp" if server.transport in {"raw", "tcp"} else server.transport
-    query = urlencode(
-        {
-            "encryption": "none",
-            "flow": server.flow,
-            "security": "reality",
-            "sni": server.reality_server_name,
-            "fp": server.fingerprint,
-            "pbk": server.reality_public_key,
-            "sid": server.reality_short_id,
-            "type": transport,
-            "headerType": "none",
-        }
-    )
+    is_xhttp = server.transport == "xhttp"
+    parameters = {
+        "encryption": "none",
+        "security": "reality",
+        "sni": server.reality_server_name,
+        "fp": server.fingerprint,
+        "pbk": server.reality_public_key,
+        "sid": server.reality_short_id,
+        "type": "xhttp" if is_xhttp else "tcp",
+    }
+    if is_xhttp:
+        parameters.update({"path": server.xhttp_path or "/", "mode": server.xhttp_mode or "auto"})
+    else:
+        parameters.update({"flow": server.flow or "xtls-rprx-vision", "headerType": "none"})
+    query = urlencode(parameters)
     return (
         f"vless://{credential}@{server.public_host}:{server.public_port}"
         f"?{query}#{quote(server_label(server))}"
@@ -62,13 +63,16 @@ class NodeManager(ABC):
     async def stats(self, server: VpnServer) -> dict[str, PeerStats]:
         return {}
 
+    async def apply_config(self, server: VpnServer) -> None:
+        return None
+
 
 class LocalConfigNodeManager(NodeManager):
     def backend(self, server: VpnServer) -> XrayBackend:
         node_settings = self.settings.model_copy(
             update={
                 "xray_config_path": server.xray_config_path or self.settings.xray_config_path,
-                "xray_flow": server.flow,
+                "xray_flow": "" if server.transport == "xhttp" else server.flow,
             }
         )
         return XrayBackend(node_settings)
@@ -81,6 +85,9 @@ class LocalConfigNodeManager(NodeManager):
 
     async def stats(self, server: VpnServer) -> dict[str, PeerStats]:
         return await self.backend(server).peer_stats()
+
+    async def apply_config(self, server: VpnServer) -> None:
+        await self.backend(server).apply_server_config(server)
 
 
 class ManualNodeManager(NodeManager):
@@ -117,6 +124,9 @@ class NodeManagerRegistry:
     async def stats(self, server: VpnServer) -> dict[str, PeerStats]:
         return await self.manager(server).stats(server)
 
+    async def apply_config(self, server: VpnServer) -> None:
+        await self.manager(server).apply_config(server)
+
     async def health_check(self, server: VpnServer, timeout: float = 5.0) -> str:
         try:
             _, writer = await asyncio.wait_for(
@@ -144,7 +154,8 @@ async def ensure_default_server(session: AsyncSession, settings: Settings) -> Vp
         public_host=settings.xray_public_host or "127.0.0.1",
         public_port=settings.xray_public_port,
         protocol="vless-reality",
-        transport="raw",
+        transport="vision",
+        reality_target=f"{settings.xray_reality_server_name}:443",
         reality_server_name=settings.xray_reality_server_name,
         reality_public_key=settings.xray_reality_public_key,
         reality_short_id=settings.xray_reality_short_id,
