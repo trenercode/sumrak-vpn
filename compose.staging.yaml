@@ -1,6 +1,24 @@
 name: sumrak-vpn-test
 
 services:
+  xray:
+    image: ghcr.io/xtls/xray-core:latest
+    container_name: sumrak-vpn-test-xray
+    restart: unless-stopped
+    command: run -config /etc/xray/config.json
+    ports:
+      - "18443:18443"
+    volumes:
+      - ./deploy/xray:/etc/xray:ro
+    healthcheck:
+      test: ["CMD", "xray", "run", "-test", "-config", "/etc/xray/config.json"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    networks:
+      - staging
+
   db:
     image: postgres:16-alpine
     container_name: sumrak-vpn-test-db
@@ -24,13 +42,34 @@ services:
   migrate:
     build: .
     container_name: sumrak-vpn-test-migrate
-    env_file: .env
+    env_file:
+      - .env
+      - ./deploy/xray/reality.env
     environment:
       DATABASE_URL: postgresql+asyncpg://vpn_test:vpn_test_change_me@db:5432/vpn_test
-      VPN_BACKEND: mock
     command: alembic upgrade head
     depends_on:
       db:
+        condition: service_healthy
+    networks:
+      - staging
+
+  staging_xray_sync:
+    build: .
+    container_name: sumrak-vpn-test-xray-sync
+    env_file:
+      - .env
+      - ./deploy/xray/reality.env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://vpn_test:vpn_test_change_me@db:5432/vpn_test
+    command: python -m app.staging
+    volumes:
+      - ./deploy/xray:/data/xray
+      - /var/run/docker.sock:/var/run/docker.sock
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      xray:
         condition: service_healthy
     networks:
       - staging
@@ -39,17 +78,23 @@ services:
     build: .
     container_name: sumrak-vpn-test-web
     restart: unless-stopped
-    env_file: .env
+    env_file:
+      - .env
+      - ./deploy/xray/reality.env
     environment:
       DATABASE_URL: postgresql+asyncpg://vpn_test:vpn_test_change_me@db:5432/vpn_test
-      VPN_BACKEND: mock
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000
     ports:
       - "127.0.0.1:8001:8000"
+    volumes:
+      - ./deploy/xray:/data/xray
+      - /var/run/docker.sock:/var/run/docker.sock
     depends_on:
       db:
         condition: service_healthy
       migrate:
+        condition: service_completed_successfully
+      staging_xray_sync:
         condition: service_completed_successfully
     networks:
       - staging
@@ -58,15 +103,21 @@ services:
     build: .
     container_name: sumrak-vpn-test-bot
     restart: unless-stopped
-    env_file: .env
+    env_file:
+      - .env
+      - ./deploy/xray/reality.env
     environment:
       DATABASE_URL: postgresql+asyncpg://vpn_test:vpn_test_change_me@db:5432/vpn_test
-      VPN_BACKEND: mock
     command: python -m app.bot
+    volumes:
+      - ./deploy/xray:/data/xray
+      - /var/run/docker.sock:/var/run/docker.sock
     depends_on:
       db:
         condition: service_healthy
       migrate:
+        condition: service_completed_successfully
+      staging_xray_sync:
         condition: service_completed_successfully
     networks:
       - staging

@@ -68,26 +68,36 @@ python -m app.bot
 ## Staging deployment
 
 Staging запускается отдельным Compose-стеком из `/opt/sumrak-vpn-test` и не использует
-production `.env`, базу, контейнеры или Xray-конфиг. `compose.staging.yaml` принудительно
-использует отдельную БД `vpn_test`, bridge-network и `VPN_BACKEND=mock`. В staging нет
-монтирования `/var/run/docker.sock`, `deploy/xray` и production Xray-контейнера.
+production `.env`, базу, Xray-контейнер, конфиг или REALITY-ключи. Staging Xray слушает
+отдельный публичный порт `18443`, использует контейнер `sumrak-vpn-test-xray` и конфиг
+`/opt/sumrak-vpn-test/deploy/xray/config.json`.
 
 ```bash
 cd /opt/sumrak-vpn-test
 git checkout feature/...
 cp .env.staging.example .env
 # Заполните отдельные BOT_TOKEN, BOT_USERNAME и ADMIN_PASSWORD
+STAGING_PUBLIC_HOST=test.sumrak.digital ./deploy/setup-staging-xray.sh
 docker compose -f compose.staging.yaml up -d --build
 docker compose -f compose.staging.yaml ps
 curl http://127.0.0.1:8001/health
+```
+
+До запуска откройте входящий TCP-порт `18443` в firewall/security group staging-сервера.
+Проверка из внешней сети:
+
+```bash
+nc -vz test.sumrak.digital 18443
 ```
 
 Изолированные ресурсы staging:
 
 - web: `sumrak-vpn-test-web`, локальный порт `127.0.0.1:8001`;
 - bot: `sumrak-vpn-test-bot`, использует только отдельный test bot token;
+- xray: `sumrak-vpn-test-xray`, публичный порт `18443`;
 - db: `sumrak-vpn-test-db`, БД `vpn_test`, локальный порт `127.0.0.1:5433`;
 - migrate: `sumrak-vpn-test-migrate`;
+- one-shot sync: `sumrak-vpn-test-xray-sync`;
 - volume: `sumrak-vpn-test-postgres-data`;
 - network: `sumrak-vpn-test-network`.
 
@@ -95,22 +105,43 @@ curl http://127.0.0.1:8001/health
 отдельный TLS-сертификат. Production `panel.sumrak.digital` продолжает проксироваться на
 порт `8000`.
 
+`setup-staging-xray.sh` один раз создаёт отдельные `privateKey`, `publicKey` и `shortId`.
+Секретный ключ сохраняется только в staging `config.json`, а публичные параметры и имя
+контейнера записываются в `deploy/xray/reality.env`. Скрипт отказывается перезаписывать
+существующие ключи и использовать production-порт `8443`.
+
 Перед каждым запуском убедитесь, что `/opt/sumrak-vpn-test/.env` содержит отдельный
-тестовый `BOT_TOKEN`. Не копируйте `/opt/sumrak-vpn/.env` и не запускайте staging через
-production `compose.yaml`.
+тестовый `BOT_TOKEN`. Не копируйте `/opt/sumrak-vpn/.env`, `deploy/xray/config.json` или
+`deploy/xray/reality.env` из production и не запускайте staging через production
+`compose.yaml`.
 
 Управление стеком:
 
 ```bash
-docker compose -f compose.staging.yaml logs -f web bot
+docker compose -f compose.staging.yaml logs -f web bot xray
+docker compose -f compose.staging.yaml exec xray xray run -test -config /etc/xray/config.json
 docker compose -f compose.staging.yaml down
 # Удаляет только staging-БД; используйте лишь когда тестовые данные больше не нужны:
 docker compose -f compose.staging.yaml down -v
 ```
 
-Для тестирования реального VLESS/REALITY/XHTTP добавьте отдельную manual-ноду через
-staging-админку. Не указывайте production-ноду и не переключайте staging на
-`local_config`.
+При первом запуске default-сервер автоматически создаётся как `local_config` из
+staging `XRAY_*` параметров. Одноразовый сервис `staging_xray_sync` также переводит
+существующий default-сервер из прежнего `manual/mock` режима в `local_config` и добавляет
+в staging Xray уже существующие активные UUID. Сервис отказывается работать с именем
+контейнера, отличным от `sumrak-vpn-test-xray`, или с портом `8443`.
+
+В `/admin/servers` проверьте:
+
+- public host: `test.sumrak.digital`;
+- public port: `18443`;
+- management mode: `local_config`;
+- health: `online`.
+
+Переключение Vision/XHTTP через админку изменяет только staging `config.json`, проверяет
+его внутри `sumrak-vpn-test-xray`, перезапускает только этот контейнер и выполняет
+rollback при ошибке. Docker socket монтируется в staging web/bot исключительно для этого
+управления; имя контейнера жёстко задано в staging `reality.env`.
 
 ## Telegram Web App
 
