@@ -90,8 +90,8 @@ mkdir -p /opt/sumrak-node
 cd /opt/sumrak-node
 KEYS="$(docker run --rm ghcr.io/xtls/xray-core:latest x25519)"
 PRIVATE_KEY="$(printf '%s\\n' "$KEYS" | awk -F': ' 'tolower($1) ~ /private/ {{print $2; exit}}')"
-PUBLIC_KEY="$(printf '%s\\n' "$KEYS" | awk -F': ' 'tolower($1) ~ /^public key$/ {{print $2; exit}}')"
-[[ -n "$PRIVATE_KEY" && -n "$PUBLIC_KEY" ]] || {{ echo "Could not parse REALITY private/public key" >&2; printf '%s\\n' "$KEYS" >&2; exit 1; }}
+PUBLIC_KEY="$(printf '%s\\n' "$KEYS" | awk -F': ' 'tolower($1) ~ /^(public key|password \\(publickey\\))$/ {{print $2; exit}}')"
+[[ -n "$PRIVATE_KEY" && -n "$PUBLIC_KEY" ]] || {{ echo "Could not parse REALITY private/public key" >&2; exit 1; }}
 SHORT_ID="$(openssl rand -hex 8)"
 AGENT_TOKEN="$(openssl rand -hex 32)"
 PUBLIC_HOST="${{PUBLIC_HOST:-$(curl -fsSL https://api.ipify.org)}}"

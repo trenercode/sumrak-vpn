@@ -52,9 +52,10 @@ def test_node_install_register_sync_and_report():
             assert "docker exec sumrak-node-agent docker restart sumrak-node-xray" in install.text
             assert 'PANEL_URL="https://panel.example.com"' in install.text
             assert '$PANEL_URL/api/node/register' in install.text
-            assert "/^public key$/" in install.text
+            assert "password \\(publickey\\)" in install.text
             assert "/public|password/" not in install.text
             assert "Could not parse REALITY private/public key" in install.text
+            assert 'printf \'%s\\n\' "$KEYS" >&2' not in install.text
             assert '"sniffing":{"enabled":true' in install.text
             assert '"tag":"blocked","protocol":"blackhole"' in install.text
             dockerfile = client.get("/node/Dockerfile.agent")
@@ -303,7 +304,7 @@ def test_agent_derives_reality_public_key(tmp_path, monkeypatch):
         return subprocess.CompletedProcess(
             args[0],
             0,
-            "Private key: private-key\nPassword: not-public\nPublic key: actual-public-key\n",
+            "PrivateKey: private-key\nPassword (PublicKey): actual-public-key\nHash32: hash\n",
             "",
         )
 

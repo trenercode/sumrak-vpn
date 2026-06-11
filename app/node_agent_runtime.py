@@ -124,7 +124,7 @@ def reality_public_key() -> str:
     )
     for line in f"{result.stdout}\n{result.stderr}".splitlines():
         label, separator, value = line.partition(":")
-        if separator and label.strip().lower() == "public key":
+        if separator and label.strip().lower() in {"public key", "password (publickey)"}:
             return value.strip()
     raise RuntimeError("Could not derive REALITY public key")
 

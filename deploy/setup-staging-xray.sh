@@ -26,7 +26,7 @@ fi
 mkdir -p "${CONFIG_DIR}"
 KEYS="$(docker run --rm "${XRAY_IMAGE}" x25519)"
 PRIVATE_KEY="$(printf '%s\n' "${KEYS}" | awk -F': ' 'tolower($1) ~ /private/ {print $2; exit}')"
-PUBLIC_KEY="$(printf '%s\n' "${KEYS}" | awk -F': ' 'tolower($1) ~ /^public key$/ {print $2; exit}')"
+PUBLIC_KEY="$(printf '%s\n' "${KEYS}" | awk -F': ' 'tolower($1) ~ /^(public key|password \(publickey\))$/ {print $2; exit}')"
 SHORT_ID="$(openssl rand -hex 8)"
 
 if [[ -z "${PRIVATE_KEY}" || -z "${PUBLIC_KEY}" ]]; then
