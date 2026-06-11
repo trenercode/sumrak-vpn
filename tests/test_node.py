@@ -55,7 +55,7 @@ def test_node_install_register_sync_and_report():
             dockerfile = client.get("/node/Dockerfile.agent")
             assert dockerfile.status_code == 200
             assert "docker.io ca-certificates" in dockerfile.text
-            assert "docker --version" in dockerfile.text
+            assert "&& docker --version" not in dockerfile.text
             assert "CMD [\"python\", \"/data/agent.py\"]" in dockerfile.text
             agent = client.get("/node/agent.py")
             assert "config.candidate.json" in agent.text
