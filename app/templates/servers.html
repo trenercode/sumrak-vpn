@@ -80,7 +80,7 @@
     <td><a href="/admin/servers/{{ server.id }}">{{ server.name }}</a><br><span class="muted">{{ server.country_name }} {{ server.city }} · {{ server.public_host }}:{{ server.public_port }}</span></td>
     <td>{{ server.management_mode }} · {{ "Vision" if server.transport in ["vision","raw","tcp"] else "XHTTP" }}</td><td>{{ server.priority }}</td>
     <td>{{ server.current_devices or 0 }}{% if server.max_devices %}/{{ server.max_devices }}{% endif %}</td>
-    <td>{{ server.health_status }}</td>
+    <td>{{ server.health_status }}{% if server.agent_last_error %}<br><span class="muted">{{ server.agent_last_error }}</span>{% endif %}</td>
     <td>{{ "default · " if server.is_default else "" }}{{ "активен" if server.is_active else "выключен" }}</td>
   </tr>
   {% endfor %}

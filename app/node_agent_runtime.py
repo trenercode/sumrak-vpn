@@ -6,13 +6,17 @@ import time
 import urllib.request
 from pathlib import Path
 
-VERSION = "0.1.2"
+VERSION = "0.1.3"
 PANEL_URL = os.environ["PANEL_URL"].rstrip("/")
 AGENT_TOKEN = os.environ["AGENT_TOKEN"]
 CONFIG_PATH = Path(os.getenv("XRAY_CONFIG_PATH", "/data/config.json"))
 HOST_NODE_DIR = Path(os.getenv("HOST_NODE_DIR", "/opt/sumrak-node"))
 XRAY_CONTAINER_NAME = os.getenv("XRAY_CONTAINER_NAME", "sumrak-node-xray")
 INTERVAL = int(os.getenv("SYNC_INTERVAL", "30"))
+
+
+def log(message: str) -> None:
+    print(f"[sumrak-node-agent] {message}", flush=True)
 
 
 def api(path: str, method: str = "GET", payload: dict | None = None) -> dict:
@@ -145,8 +149,8 @@ def report(error: str | None, clients_count: int) -> None:
                 "reality_public_key": public_key,
             },
         )
-    except Exception:
-        pass
+    except Exception as report_error:
+        log(f"report failed: {type(report_error).__name__}")
 
 
 def main() -> None:
@@ -161,8 +165,11 @@ def main() -> None:
             else:
                 candidate.unlink(missing_ok=True)
             report(None, clients_count)
+            log(f"sync completed: clients={clients_count}")
         except Exception as error:
-            report(str(error)[:2000], clients_count)
+            message = f"{type(error).__name__}: {error}"
+            log(message[:2000])
+            report(message[:2000], clients_count)
         time.sleep(INTERVAL)
 
 

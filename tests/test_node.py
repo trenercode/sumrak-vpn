@@ -310,3 +310,15 @@ def test_agent_derives_reality_public_key(tmp_path, monkeypatch):
 
     monkeypatch.setattr(runtime.subprocess, "run", run)
     assert runtime.reality_public_key() == "actual-public-key"
+
+
+def test_agent_log_flushes_output(monkeypatch):
+    monkeypatch.setenv("PANEL_URL", "https://panel.example.com")
+    monkeypatch.setenv("AGENT_TOKEN", "secret")
+    runtime = importlib.import_module("app.node_agent_runtime")
+    messages = []
+
+    monkeypatch.setattr("builtins.print", lambda *args, **kwargs: messages.append((args, kwargs)))
+    runtime.log("sync failed")
+
+    assert messages == [(("[sumrak-node-agent] sync failed",), {"flush": True})]
