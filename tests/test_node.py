@@ -52,6 +52,8 @@ def test_node_install_register_sync_and_report():
             assert "docker exec sumrak-node-agent docker restart sumrak-node-xray" in install.text
             assert 'PANEL_URL="https://panel.example.com"' in install.text
             assert '$PANEL_URL/api/node/register' in install.text
+            assert '"sniffing":{"enabled":true' in install.text
+            assert '"tag":"blocked","protocol":"blackhole"' in install.text
             dockerfile = client.get("/node/Dockerfile.agent")
             assert dockerfile.status_code == 200
             assert "FROM docker:27-cli AS dockercli" in dockerfile.text
@@ -182,6 +184,14 @@ def test_agent_renders_xhttp_and_vision_candidates(tmp_path, monkeypatch):
     assert inbound["streamSettings"]["network"] == "xhttp"
     assert inbound["streamSettings"]["xhttpSettings"] == {"path": "/vpn", "mode": "auto"}
     assert inbound["streamSettings"]["realitySettings"]["privateKey"] == "private-key"
+    assert inbound["sniffing"] == {
+        "enabled": True,
+        "destOverride": ["http", "tls", "quic"],
+    }
+    assert xhttp["outbounds"] == [
+        {"tag": "direct", "protocol": "freedom"},
+        {"tag": "blocked", "protocol": "blackhole"},
+    ]
 
     desired["transport"] = "vision"
     vision = json.loads(runtime.render(desired).read_text())

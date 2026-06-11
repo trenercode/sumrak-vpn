@@ -6,7 +6,7 @@ import time
 import urllib.request
 from pathlib import Path
 
-VERSION = "0.1.0"
+VERSION = "0.1.1"
 PANEL_URL = os.environ["PANEL_URL"].rstrip("/")
 AGENT_TOKEN = os.environ["AGENT_TOKEN"]
 CONFIG_PATH = Path(os.getenv("XRAY_CONFIG_PATH", "/data/config.json"))
@@ -43,6 +43,10 @@ def render(desired: dict) -> Path:
         else:
             client["flow"] = "xtls-rprx-vision"
     inbound.setdefault("settings", {})["clients"] = clients
+    inbound["sniffing"] = {
+        "enabled": True,
+        "destOverride": ["http", "tls", "quic"],
+    }
     stream = inbound.setdefault("streamSettings", {})
     stream["network"] = "xhttp" if is_xhttp else "raw"
     stream["security"] = "reality"
@@ -57,6 +61,15 @@ def render(desired: dict) -> Path:
     reality["target"] = desired["reality_target"]
     reality["serverNames"] = [desired["reality_server_name"]]
     reality["shortIds"] = [desired["reality_short_id"]]
+    outbounds = [
+        outbound
+        for outbound in config.get("outbounds", [])
+        if outbound.get("tag") != "blocked"
+    ]
+    if not any(outbound.get("tag") == "direct" for outbound in outbounds):
+        outbounds.append({"tag": "direct", "protocol": "freedom"})
+    outbounds.append({"tag": "blocked", "protocol": "blackhole"})
+    config["outbounds"] = outbounds
     candidate = CONFIG_PATH.with_name("config.candidate.json")
     candidate.write_text(json.dumps(config, ensure_ascii=True, indent=2) + "\n")
     json.loads(candidate.read_text())

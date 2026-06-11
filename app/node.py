@@ -78,7 +78,7 @@ SHORT_ID="$(openssl rand -hex 8)"
 AGENT_TOKEN="$(openssl rand -hex 32)"
 PUBLIC_HOST="${{PUBLIC_HOST:-$(curl -fsSL https://api.ipify.org)}}"
 cat > config.json <<EOF
-{{"log":{{"loglevel":"warning"}},"inbounds":[{{"tag":"vless-reality","listen":"0.0.0.0","port":443,"protocol":"vless","settings":{{"clients":[],"decryption":"none"}},"streamSettings":{{"network":"xhttp","security":"reality","xhttpSettings":{{"path":"/","mode":"auto"}},"realitySettings":{{"show":false,"target":"www.microsoft.com:443","serverNames":["www.microsoft.com"],"privateKey":"$PRIVATE_KEY","shortIds":["$SHORT_ID"]}}}}}}],"outbounds":[{{"tag":"direct","protocol":"freedom"}}]}}
+{{"log":{{"loglevel":"warning"}},"inbounds":[{{"tag":"vless-reality","listen":"0.0.0.0","port":443,"protocol":"vless","settings":{{"clients":[],"decryption":"none"}},"streamSettings":{{"network":"xhttp","security":"reality","xhttpSettings":{{"path":"/","mode":"auto"}},"realitySettings":{{"show":false,"target":"www.microsoft.com:443","serverNames":["www.microsoft.com"],"privateKey":"$PRIVATE_KEY","shortIds":["$SHORT_ID"]}}}},"sniffing":{{"enabled":true,"destOverride":["http","tls","quic"]}}}}],"outbounds":[{{"tag":"direct","protocol":"freedom"}},{{"tag":"blocked","protocol":"blackhole"}}]}}
 EOF
 curl -fsSL "$PANEL_URL/node/agent.py" -o agent.py
 curl -fsSL "$PANEL_URL/node/Dockerfile.agent" -o Dockerfile.agent
