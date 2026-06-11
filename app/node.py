@@ -79,7 +79,6 @@ async def reconcile_agent_server(session: AsyncSession, server: VpnServer) -> in
                 VpnServer.id != server.id,
                 VpnServer.management_mode.in_(["agent", "agent_future"]),
                 VpnServer.public_host == server.public_host,
-                VpnServer.public_port == server.public_port,
                 VpnServer.is_active.is_(True),
             )
         )

@@ -54,7 +54,7 @@ def test_node_install_register_sync_and_report():
                 VpnServer(
                     name="Old France",
                     public_host="31.56.146.138",
-                    public_port=443,
+                    public_port=8443,
                     reality_server_name="www.microsoft.com",
                     reality_public_key="old-key",
                     reality_short_id="0123456789abcdef",
