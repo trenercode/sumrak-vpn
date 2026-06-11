@@ -52,6 +52,9 @@ def test_node_install_register_sync_and_report():
             assert "docker exec sumrak-node-agent docker restart sumrak-node-xray" in install.text
             assert 'PANEL_URL="https://panel.example.com"' in install.text
             assert '$PANEL_URL/api/node/register' in install.text
+            assert "/^public key$/" in install.text
+            assert "/public|password/" not in install.text
+            assert "Could not parse REALITY private/public key" in install.text
             assert '"sniffing":{"enabled":true' in install.text
             assert '"tag":"blocked","protocol":"blackhole"' in install.text
             dockerfile = client.get("/node/Dockerfile.agent")
@@ -105,7 +108,12 @@ def test_node_install_register_sync_and_report():
             report = client.post(
                 "/api/node/report",
                 headers=headers,
-                json={"node_version": "0.1.0", "clients_count": 1, "last_error": None},
+                json={
+                    "node_version": "0.1.0",
+                    "clients_count": 1,
+                    "last_error": None,
+                    "reality_public_key": "actual-public-key",
+                },
             )
             assert report.status_code == 200
 
@@ -118,8 +126,48 @@ def test_node_install_register_sync_and_report():
                 )
                 assert server.agent_version == "0.1.0"
                 assert server.agent_clients_count == 1
+                assert server.reality_public_key == "actual-public-key"
                 assert enrollment.status == "used"
                 assert enrollment.used_at is not None
+
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+    asyncio.run(scenario())
+
+
+def test_node_registration_rejects_invalid_reality_identity():
+    async def scenario():
+        engine, sessions = await database()
+        async with sessions() as session:
+            session.add(
+                NodeEnrollment(
+                    node_token="invalid-identity-token",
+                    expires_at=datetime.now(UTC) + timedelta(minutes=30),
+                    server_name="Invalid",
+                    expected_country_code="FR",
+                    status="pending",
+                )
+            )
+            await session.commit()
+
+        async def override_session():
+            async with sessions() as session:
+                yield session
+
+        app.dependency_overrides[get_session] = override_session
+        with TestClient(app) as client:
+            response = client.post(
+                "/api/node/register",
+                json={
+                    "node_token": "invalid-identity-token",
+                    "public_host": "31.56.146.138",
+                    "reality_public_key": "",
+                    "reality_short_id": "not-hex",
+                    "agent_token": "agent-secret",
+                },
+            )
+            assert response.status_code == 422
 
         app.dependency_overrides.clear()
         await engine.dispose()
@@ -229,3 +277,35 @@ def test_agent_rolls_back_config_when_restart_fails(tmp_path, monkeypatch):
 
     assert runtime.CONFIG_PATH.read_text() == '{"version":"working"}'
     assert candidate.exists()
+
+
+def test_agent_derives_reality_public_key(tmp_path, monkeypatch):
+    monkeypatch.setenv("PANEL_URL", "https://panel.example.com")
+    monkeypatch.setenv("AGENT_TOKEN", "secret")
+    runtime = importlib.import_module("app.node_agent_runtime")
+    runtime.CONFIG_PATH = tmp_path / "config.json"
+    runtime.CONFIG_PATH.write_text(
+        json.dumps(
+            {
+                "inbounds": [
+                    {
+                        "tag": "vless-reality",
+                        "streamSettings": {
+                            "realitySettings": {"privateKey": "private-key"}
+                        },
+                    }
+                ]
+            }
+        )
+    )
+
+    def run(*args, **kwargs):
+        return subprocess.CompletedProcess(
+            args[0],
+            0,
+            "Private key: private-key\nPassword: not-public\nPublic key: actual-public-key\n",
+            "",
+        )
+
+    monkeypatch.setattr(runtime.subprocess, "run", run)
+    assert runtime.reality_public_key() == "actual-public-key"

@@ -6,7 +6,7 @@ import time
 import urllib.request
 from pathlib import Path
 
-VERSION = "0.1.1"
+VERSION = "0.1.2"
 PANEL_URL = os.environ["PANEL_URL"].rstrip("/")
 AGENT_TOKEN = os.environ["AGENT_TOKEN"]
 CONFIG_PATH = Path(os.getenv("XRAY_CONFIG_PATH", "/data/config.json"))
@@ -112,12 +112,38 @@ def apply(candidate: Path) -> None:
     candidate.unlink(missing_ok=True)
 
 
+def reality_public_key() -> str:
+    config = json.loads(CONFIG_PATH.read_text())
+    inbound = next(item for item in config["inbounds"] if item.get("tag") == "vless-reality")
+    private_key = inbound["streamSettings"]["realitySettings"]["privateKey"]
+    result = subprocess.run(
+        ["docker", "exec", XRAY_CONTAINER_NAME, "xray", "x25519", "-i", private_key],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    for line in f"{result.stdout}\n{result.stderr}".splitlines():
+        label, separator, value = line.partition(":")
+        if separator and label.strip().lower() == "public key":
+            return value.strip()
+    raise RuntimeError("Could not derive REALITY public key")
+
+
 def report(error: str | None, clients_count: int) -> None:
     try:
+        try:
+            public_key = reality_public_key()
+        except Exception:
+            public_key = None
         api(
             "/api/node/report",
             "POST",
-            {"node_version": VERSION, "last_error": error, "clients_count": clients_count},
+            {
+                "node_version": VERSION,
+                "last_error": error,
+                "clients_count": clients_count,
+                "reality_public_key": public_key,
+            },
         )
     except Exception:
         pass

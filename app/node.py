@@ -4,7 +4,7 @@ from pathlib import Path
 
 from fastapi import APIRouter, Depends, Header, HTTPException
 from fastapi.responses import PlainTextResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -32,11 +32,28 @@ class NodeRegistration(BaseModel):
     xhttp_mode: str = "auto"
     agent_token: str
 
+    @field_validator("public_host", "reality_public_key", "reality_server_name", "agent_token")
+    @classmethod
+    def require_nonempty(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("value must not be empty")
+        return value
+
+    @field_validator("reality_short_id")
+    @classmethod
+    def validate_short_id(cls, value: str) -> str:
+        value = value.strip().lower()
+        if len(value) not in range(2, 17, 2) or any(char not in "0123456789abcdef" for char in value):
+            raise ValueError("shortId must contain 2-16 hexadecimal characters with even length")
+        return value
+
 
 class NodeReport(BaseModel):
     node_version: str
     last_error: str | None = None
     clients_count: int = 0
+    reality_public_key: str | None = None
 
 
 async def authenticated_agent(
@@ -73,10 +90,13 @@ mkdir -p /opt/sumrak-node
 cd /opt/sumrak-node
 KEYS="$(docker run --rm ghcr.io/xtls/xray-core:latest x25519)"
 PRIVATE_KEY="$(printf '%s\\n' "$KEYS" | awk -F': ' 'tolower($1) ~ /private/ {{print $2; exit}}')"
-PUBLIC_KEY="$(printf '%s\\n' "$KEYS" | awk -F': ' 'tolower($1) ~ /public|password/ {{print $2; exit}}')"
+PUBLIC_KEY="$(printf '%s\\n' "$KEYS" | awk -F': ' 'tolower($1) ~ /^public key$/ {{print $2; exit}}')"
+[[ -n "$PRIVATE_KEY" && -n "$PUBLIC_KEY" ]] || {{ echo "Could not parse REALITY private/public key" >&2; printf '%s\\n' "$KEYS" >&2; exit 1; }}
 SHORT_ID="$(openssl rand -hex 8)"
 AGENT_TOKEN="$(openssl rand -hex 32)"
 PUBLIC_HOST="${{PUBLIC_HOST:-$(curl -fsSL https://api.ipify.org)}}"
+[[ "$SHORT_ID" =~ ^[0-9a-f]{{16}}$ ]] || {{ echo "Invalid REALITY shortId" >&2; exit 1; }}
+[[ -n "$PUBLIC_HOST" ]] || {{ echo "Could not determine public host" >&2; exit 1; }}
 cat > config.json <<EOF
 {{"log":{{"loglevel":"warning"}},"inbounds":[{{"tag":"vless-reality","listen":"0.0.0.0","port":443,"protocol":"vless","settings":{{"clients":[],"decryption":"none"}},"streamSettings":{{"network":"xhttp","security":"reality","xhttpSettings":{{"path":"/","mode":"auto"}},"realitySettings":{{"show":false,"target":"www.microsoft.com:443","serverNames":["www.microsoft.com"],"privateKey":"$PRIVATE_KEY","shortIds":["$SHORT_ID"]}}}},"sniffing":{{"enabled":true,"destOverride":["http","tls","quic"]}}}}],"outbounds":[{{"tag":"direct","protocol":"freedom"}},{{"tag":"blocked","protocol":"blackhole"}}]}}
 EOF
@@ -220,6 +240,8 @@ async def report_node(
     server.agent_version = payload.node_version
     server.agent_last_error = payload.last_error
     server.agent_clients_count = payload.clients_count
+    if payload.reality_public_key:
+        server.reality_public_key = payload.reality_public_key
     server.health_status = "error" if payload.last_error else "online"
     await session.commit()
     return {"status": "ok"}
