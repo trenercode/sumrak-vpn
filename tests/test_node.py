@@ -47,9 +47,16 @@ def test_node_install_register_sync_and_report():
             install = client.get("/node/install.sh")
             assert install.status_code == 200
             assert "sumrak-node-agent" in install.text
-            assert "docker compose up -d --build" in install.text
+            assert "docker compose build --no-cache agent" in install.text
+            assert "docker exec sumrak-node-agent docker version" in install.text
+            assert "docker exec sumrak-node-agent docker restart sumrak-node-xray" in install.text
             assert 'PANEL_URL="https://panel.example.com"' in install.text
             assert '$PANEL_URL/api/node/register' in install.text
+            dockerfile = client.get("/node/Dockerfile.agent")
+            assert dockerfile.status_code == 200
+            assert "docker.io ca-certificates" in dockerfile.text
+            assert "docker --version" in dockerfile.text
+            assert "CMD [\"python\", \"/data/agent.py\"]" in dockerfile.text
             agent = client.get("/node/agent.py")
             assert "config.candidate.json" in agent.text
             assert '"-test"' in agent.text

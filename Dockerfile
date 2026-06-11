@@ -10,6 +10,7 @@ RUN apt-get update \
 WORKDIR /app
 COPY pyproject.toml .
 COPY app app
+COPY deploy/node deploy/node
 COPY alembic.ini .
 COPY alembic alembic
 RUN pip install --no-cache-dir .

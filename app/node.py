@@ -14,6 +14,7 @@ from app.models import DeviceServerProfile, NodeEnrollment, VpnServer
 
 router = APIRouter(tags=["node"])
 BASE_DIR = Path(__file__).resolve().parent
+PROJECT_DIR = BASE_DIR.parent
 
 
 def as_utc(value: datetime) -> datetime:
@@ -80,11 +81,7 @@ cat > config.json <<EOF
 {{"log":{{"loglevel":"warning"}},"inbounds":[{{"tag":"vless-reality","listen":"0.0.0.0","port":443,"protocol":"vless","settings":{{"clients":[],"decryption":"none"}},"streamSettings":{{"network":"xhttp","security":"reality","xhttpSettings":{{"path":"/","mode":"auto"}},"realitySettings":{{"show":false,"target":"www.microsoft.com:443","serverNames":["www.microsoft.com"],"privateKey":"$PRIVATE_KEY","shortIds":["$SHORT_ID"]}}}}}}],"outbounds":[{{"tag":"direct","protocol":"freedom"}}]}}
 EOF
 curl -fsSL "$PANEL_URL/node/agent.py" -o agent.py
-cat > Dockerfile.agent <<'EOF'
-FROM python:3.12-slim
-RUN apt-get update && apt-get install -y --no-install-recommends docker.io ca-certificates && rm -rf /var/lib/apt/lists/*
-CMD ["python", "/data/agent.py"]
-EOF
+curl -fsSL "$PANEL_URL/node/Dockerfile.agent" -o Dockerfile.agent
 cat > compose.yaml <<EOF
 services:
   xray:
@@ -109,7 +106,10 @@ services:
       - ./:/data
       - /var/run/docker.sock:/var/run/docker.sock
 EOF
-docker compose up -d --build
+docker compose build --no-cache agent
+docker compose up -d
+docker exec sumrak-node-agent docker version
+docker exec sumrak-node-agent docker restart sumrak-node-xray
 curl -fsSL -X POST "$PANEL_URL/api/node/register" -H 'Content-Type: application/json' -d "$(printf '{{"node_token":"%s","public_host":"%s","public_port":443,"reality_public_key":"%s","reality_short_id":"%s","reality_server_name":"www.microsoft.com","xhttp_path":"/","xhttp_mode":"auto","agent_token":"%s"}}' "$NODE_TOKEN" "$PUBLIC_HOST" "$PUBLIC_KEY" "$SHORT_ID" "$AGENT_TOKEN")"
 echo "Sumrak node installed: $PUBLIC_HOST:443"
 """
@@ -120,6 +120,14 @@ echo "Sumrak node installed: $PUBLIC_HOST:443"
 async def agent_runtime():
     return PlainTextResponse(
         (BASE_DIR / "node_agent_runtime.py").read_text(), media_type="text/x-python"
+    )
+
+
+@router.get("/node/Dockerfile.agent", response_class=PlainTextResponse)
+async def agent_dockerfile():
+    return PlainTextResponse(
+        (PROJECT_DIR / "deploy" / "node" / "Dockerfile.agent").read_text(),
+        media_type="text/plain",
     )
 
 

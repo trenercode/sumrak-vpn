@@ -486,6 +486,9 @@ curl -sSL https://PANEL_PUBLIC_URL/node/install.sh | bash -s -- NODE_TOKEN
 Запустите её от `root` на чистом Linux-сервере с публичным TCP-портом `443`. Установщик
 поставит Docker и Compose plugin, создаст отдельные REALITY-ключи, поднимет контейнеры
 `sumrak-node-xray` и `sumrak-node-agent`, затем зарегистрирует ноду в панели.
+Образ agent собирается из `deploy/node/Dockerfile.agent` с Docker CLI и
+`ca-certificates`; установщик проверяет `docker version` и перезапуск Xray через
+примонтированный `/var/run/docker.sock`.
 
 Agent каждые 30 секунд получает активные UUID через HTTPS, собирает
 `config.candidate.json`, проверяет его через `xray run -test` и только после успешной
