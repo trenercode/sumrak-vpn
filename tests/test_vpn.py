@@ -230,6 +230,7 @@ async def test_apply_server_config_rolls_back_when_xray_does_not_start(tmp_path)
 
     assert json.loads(config_path.read_text()) == original
     assert (tmp_path / "config.json.backup").exists()
+    assert (tmp_path / "config.candidate.json").exists()
     assert restarts == [True, True]
 
 
@@ -268,3 +269,54 @@ async def test_apply_server_config_keeps_working_config_when_validation_fails(tm
 
     assert json.loads(config_path.read_text()) == original
     assert not (tmp_path / "config.json.backup").exists()
+    assert (tmp_path / "config.candidate.json").exists()
+
+
+def test_decode_chunked_docker_response():
+    response = (
+        b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n"
+        b"4\r\ntest\r\n"
+        b"7\r\n output\r\n"
+        b"0\r\n\r\n"
+    )
+    assert XrayBackend._decode_docker_response(response) == b"test output"
+
+
+async def test_xray_config_test_treats_output_as_text_and_uses_exit_code():
+    backend = XrayBackend(Settings(xray_container_name="vpn-xray"))
+    responses = iter(
+        [
+            (b"HTTP/1.1 201 Created\r\n", b'{"Id":"exec-id"}'),
+            (b"HTTP/1.1 200 OK\r\n", b"Xray 26.3.27\nConfiguration OK.\n"),
+            (b"HTTP/1.1 200 OK\r\n", b'{"ExitCode":0}'),
+        ]
+    )
+
+    async def docker_request(method, path, payload=None):
+        return next(responses)
+
+    backend._docker_request = docker_request
+    await backend._test_xray_config("/etc/xray/config.candidate.json")
+
+
+async def test_xray_config_test_shows_text_output_on_nonzero_exit():
+    backend = XrayBackend(Settings(xray_container_name="vpn-xray"))
+    responses = iter(
+        [
+            (b"HTTP/1.1 201 Created\r\n", b'{"Id":"exec-id"}'),
+            (b"HTTP/1.1 200 OK\r\n", b"failed to parse XHTTP settings"),
+            (b"HTTP/1.1 200 OK\r\n", b'{"ExitCode":23}'),
+        ]
+    )
+
+    async def docker_request(method, path, payload=None):
+        return next(responses)
+
+    backend._docker_request = docker_request
+    try:
+        await backend._test_xray_config("/etc/xray/config.candidate.json")
+    except RuntimeError as error:
+        assert "returncode=23" in str(error)
+        assert "failed to parse XHTTP settings" in str(error)
+    else:
+        raise AssertionError("_test_xray_config must fail")

@@ -81,6 +81,24 @@ class MockVpnBackend(VpnBackend):
 
 
 class XrayBackend(VpnBackend):
+    @staticmethod
+    def _decode_docker_response(response: bytes) -> bytes:
+        headers, separator, body = response.partition(b"\r\n\r\n")
+        if not separator or b"transfer-encoding: chunked" not in headers.lower():
+            return body if separator else response
+
+        decoded = bytearray()
+        while body:
+            size_line, separator, body = body.partition(b"\r\n")
+            if not separator:
+                raise RuntimeError("Invalid chunked response from Docker API")
+            size = int(size_line.split(b";", 1)[0], 16)
+            if size == 0:
+                break
+            decoded.extend(body[:size])
+            body = body[size + 2 :]
+        return bytes(decoded)
+
     def _mutate_clients(
         self, *, credential: str | None = None, client_email: str, remove: bool = False
     ) -> bool:
@@ -156,7 +174,7 @@ class XrayBackend(VpnBackend):
         response = await reader.read()
         writer.close()
         await writer.wait_closed()
-        return status_line, response.split(b"\r\n\r\n", 1)[-1]
+        return status_line, self._decode_docker_response(response)
 
     async def _restart_xray(self) -> None:
         path = f"/containers/{quote(self.settings.xray_container_name, safe='')}/restart?t=10"
@@ -187,9 +205,17 @@ class XrayBackend(VpnBackend):
         )
         if b" 200 " not in status_line:
             raise RuntimeError(f"Could not run Xray config test: {output.decode(errors='replace')}")
-        _, inspection = await self._docker_request("GET", f"/exec/{quote(exec_id, safe='')}/json")
-        if json.loads(inspection).get("ExitCode") != 0:
-            raise RuntimeError(f"Xray rejected config: {output.decode(errors='replace').strip()}")
+        status_line, inspection = await self._docker_request(
+            "GET", f"/exec/{quote(exec_id, safe='')}/json"
+        )
+        if b" 200 " not in status_line:
+            raise RuntimeError(
+                f"Could not inspect Xray config test: {inspection.decode(errors='replace')}"
+            )
+        returncode = json.loads(inspection)["ExitCode"]
+        output_text = output.decode(errors="replace").strip()
+        if returncode != 0:
+            raise RuntimeError(f"Xray rejected config (returncode={returncode}): {output_text}")
 
     async def _ensure_xray_running(self) -> None:
         container = quote(self.settings.xray_container_name, safe="")
@@ -242,6 +268,7 @@ class XrayBackend(VpnBackend):
             output.flush()
             os.fsync(output.fileno())
         os.chmod(candidate_path, stat.S_IMODE(config_path.stat().st_mode))
+        json.loads(candidate_path.read_text())
         container_config = Path(self.settings.xray_container_config_path)
         return candidate_path, container_config.with_name(candidate_path.name)
 
@@ -253,17 +280,22 @@ class XrayBackend(VpnBackend):
         backup_path = config_path.with_suffix(f"{config_path.suffix}.backup")
         try:
             await self._test_xray_config(str(container_candidate))
-            await asyncio.to_thread(shutil.copy2, config_path, backup_path)
-            await asyncio.to_thread(os.replace, candidate_path, config_path)
-            try:
-                await self._restart_xray()
-                await self._ensure_xray_running()
-            except Exception:
-                await asyncio.to_thread(shutil.copy2, backup_path, config_path)
-                await self._restart_xray()
-                raise
-        finally:
-            candidate_path.unlink(missing_ok=True)
+        except Exception as error:
+            raise RuntimeError(
+                f"{error}; candidate kept for diagnostics at {candidate_path}"
+            ) from error
+        await asyncio.to_thread(shutil.copy2, config_path, backup_path)
+        await asyncio.to_thread(shutil.copy2, candidate_path, config_path)
+        try:
+            await self._restart_xray()
+            await self._ensure_xray_running()
+        except Exception as error:
+            await asyncio.to_thread(shutil.copy2, backup_path, config_path)
+            await self._restart_xray()
+            raise RuntimeError(
+                f"{error}; candidate kept for diagnostics at {candidate_path}"
+            ) from error
+        candidate_path.unlink(missing_ok=True)
 
     async def _grpc(self, method: str, payload: dict) -> dict:
         process = await asyncio.create_subprocess_exec(

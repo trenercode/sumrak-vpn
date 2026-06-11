@@ -317,6 +317,10 @@ xray run -test -config /etc/xray/config.candidate.json
 возвращает backup и повторно запускает Xray. Список `settings.clients`, UUID и закрытый
 REALITY-ключ при переключении транспорта сохраняются.
 
+Успешность `xray run -test` определяется только по exit code команды. stdout/stderr
+показывается как обычный текст. При ошибке `config.candidate.json` остаётся рядом с
+рабочим конфигом для диагностики и его путь выводится в сообщении админки.
+
 ### Staging-проверка XHTTP
 
 Переключение сначала проверяйте только на `test.sumrak.digital` с отдельными БД,
