@@ -306,10 +306,10 @@ Xray-ноды работают независимо от Telegram-бота, ад
   `xhttpSettings` (`path` и `mode`), а `flow` удаляется из клиентов и subscription URI.
 
 Для `local_config` приложение не заменяет рабочий конфиг сразу. Оно создаёт рядом
-`config.json.candidate`, запускает в контейнере:
+`config.candidate.json`, запускает в контейнере:
 
 ```bash
-xray run -test -config /etc/xray/config.json.candidate
+xray run -test -config /etc/xray/config.candidate.json
 ```
 
 После успешной проверки текущий файл сохраняется как `config.json.backup`, candidate

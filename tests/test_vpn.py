@@ -209,7 +209,7 @@ async def test_apply_server_config_rolls_back_when_xray_does_not_start(tmp_path)
     restarts = []
 
     async def test_config(path):
-        assert path.endswith("config.json.candidate")
+        assert path.endswith("config.candidate.json")
 
     async def restart():
         restarts.append(True)

@@ -235,7 +235,7 @@ class XrayBackend(VpnBackend):
         reality["serverNames"] = [server.reality_server_name]
         reality["shortIds"] = [server.reality_short_id]
 
-        candidate_path = config_path.with_suffix(f"{config_path.suffix}.candidate")
+        candidate_path = config_path.with_name(f"{config_path.stem}.candidate{config_path.suffix}")
         with candidate_path.open("w") as output:
             json.dump(config, output, ensure_ascii=True, indent=2)
             output.write("\n")
