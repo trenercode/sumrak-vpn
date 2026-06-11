@@ -179,10 +179,11 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
 EOF
 docker compose build --no-cache agent
-docker compose up -d
+docker compose up -d xray
+curl -fsSL -X POST "$PANEL_URL/api/node/register" -H 'Content-Type: application/json' -d "$(printf '{{"node_token":"%s","public_host":"%s","public_port":443,"reality_public_key":"%s","reality_short_id":"%s","reality_server_name":"www.microsoft.com","xhttp_path":"/","xhttp_mode":"auto","agent_token":"%s"}}' "$NODE_TOKEN" "$PUBLIC_HOST" "$PUBLIC_KEY" "$SHORT_ID" "$AGENT_TOKEN")"
+docker compose up -d agent
 docker exec sumrak-node-agent docker version
 docker exec sumrak-node-agent docker restart sumrak-node-xray
-curl -fsSL -X POST "$PANEL_URL/api/node/register" -H 'Content-Type: application/json' -d "$(printf '{{"node_token":"%s","public_host":"%s","public_port":443,"reality_public_key":"%s","reality_short_id":"%s","reality_server_name":"www.microsoft.com","xhttp_path":"/","xhttp_mode":"auto","agent_token":"%s"}}' "$NODE_TOKEN" "$PUBLIC_HOST" "$PUBLIC_KEY" "$SHORT_ID" "$AGENT_TOKEN")"
 echo "Sumrak node installed: $PUBLIC_HOST:443"
 """
     return PlainTextResponse(script, media_type="text/x-shellscript")

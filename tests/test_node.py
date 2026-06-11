@@ -75,6 +75,12 @@ def test_node_install_register_sync_and_report():
             assert install.status_code == 200
             assert "sumrak-node-agent" in install.text
             assert "docker compose build --no-cache agent" in install.text
+            assert install.text.index("docker compose up -d xray") < install.text.index(
+                '$PANEL_URL/api/node/register'
+            )
+            assert install.text.index('$PANEL_URL/api/node/register') < install.text.index(
+                "docker compose up -d agent"
+            )
             assert "docker exec sumrak-node-agent docker version" in install.text
             assert "docker exec sumrak-node-agent docker restart sumrak-node-xray" in install.text
             assert 'PANEL_URL="https://panel.example.com"' in install.text
