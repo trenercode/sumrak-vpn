@@ -1,528 +1,516 @@
-# VLESS Reality VPN Service MVP
+# Sumrak VPN
 
-Сервис управляет профилями Xray/VLESS Reality через Telegram-бота и веб-админку.
+Sumrak VPN — сервис управления VPN-доступом на базе Telegram-бота, FastAPI,
+PostgreSQL и Xray VLESS + REALITY.
 
-## Основной транспорт
+Основной режим для новых agent-нод:
 
-Основной и рекомендуемый режим — `VLESS + REALITY + XHTTP`. Резервный режим —
-`VLESS + REALITY + XTLS Vision` поверх RAW/TCP.
+- VLESS + REALITY + XHTTP;
+- post-quantum VLESS encryption;
+- ML-DSA65 REALITY identity;
+- Xray Core `26.6.1`.
 
-- REALITY маскирует TLS-handshake под выбранный обычный HTTPS-сайт.
-- XHTTP используется как основной стабильный режим.
-- XTLS Vision сохраняется как быстрый резервный режим.
-- Каждому устройству выдается отдельный UUID.
-- Пользователи добавляются в `settings.clients` конфигурации Xray.
-- После добавления или удаления клиента контейнер Xray перезапускается.
-
-Абсолютно неблокируемых протоколов не существует. Для публичного сервиса нужно
-использовать несколько узлов у разных хостеров, следить за доступностью из разных сетей
-и быть готовым менять адреса и транспорт.
+Резервный режим — VLESS + REALITY + XTLS Vision.
 
 ## Возможности
 
-- Telegram-бот выдает стандартные `vless://` ссылки;
-- до 10 активных устройств на пользователя;
-- пробный период начинается при создании первого профиля;
-- ручная выдача дней подписки через админку;
-- отзыв устройств и блокировка пользователей;
-- автоматическое отключение профилей после окончания доступа;
-- статистика активности и трафика каждого UUID;
-- выбор платформы и инструкции по установке из админки;
-- реферальная программа: скидка другу и +15 дней после первой оплаты;
-- уведомления об окончании trial и подписки без повторного спама;
-- рассылки всем, активным, истекающим или одному пользователю;
-- веб-админка на `/admin`.
-- мобильный Telegram Web App на `/webapp`.
+- Telegram-бот и Telegram Web App;
+- пробный период и ручная выдача подписок;
+- до 10 устройств пользователя;
+- subscription URL со списком доступных серверов;
+- мультисерверная архитектура;
+- автоматическое подключение новых VPN-нод одной командой;
+- синхронизация UUID через `sumrak-node-agent`;
+- безопасное применение Xray config с проверкой и rollback;
+- админка серверов, пользователей, клиентов и рассылок;
+- реферальная программа;
+- уведомления об окончании доступа;
+- PostgreSQL и Alembic-миграции.
 
-Профили импортируются в Hiddify, v2rayN, Nekoray, Happ и другие клиенты с поддержкой
-VLESS Reality.
+Платёжная система пока не подключена. Успешную оплату администратор отмечает вручную.
 
 ## Архитектура
 
-- `xray`: VLESS Reality сервер на TCP/8443 и локальный API статистики;
-- `bot`: Telegram-интерфейс и минутная синхронизация подписок;
-- `web`: FastAPI-админка;
-- `db`: PostgreSQL.
+Центральный сервер:
 
-Система поддерживает несколько VPN-нод. Каждое устройство имеет отдельный профиль на
-каждом активном сервере и одну subscription URL вида `/sub/{token}`. Клиент получает
-список стран из этой подписки и может переключаться между ними.
+- `web` — FastAPI, админка, Web App, subscription и node API;
+- `bot` — Telegram-бот, уведомления и рассылки;
+- `db` — PostgreSQL;
+- `migrate` — применение Alembic-миграций;
+- `xray` — локальная/default VPN-нода, если она используется.
 
-После миграции существующие устройства сохраняют свои UUID и прямые VLESS-профили.
-Default-сервер и записи `device_server_profiles` для них создаются автоматически при
-первой фоновой синхронизации.
+Удалённая agent-нода:
 
-## Локальный запуск
+- `sumrak-node-xray` — Xray Core;
+- `sumrak-node-agent` — получает клиентов от панели и применяет конфиг;
+- `/opt/sumrak-node/config.json` — рабочий Xray config;
+- `/opt/sumrak-node/config.json.backup` — предыдущий рабочий config.
+
+Xray-ноды продолжают обслуживать уже выданные профили, если центральный сервер,
+Telegram-бот или PostgreSQL временно недоступны. Центральный сервер нужен для создания
+профилей, обновления подписок и управления доступом.
+
+## Требования
+
+- Linux-сервер;
+- Docker Engine;
+- Docker Compose plugin;
+- домен с HTTPS для центральной панели;
+- Telegram-бот от BotFather;
+- открытый TCP-порт `443` на удалённых VPN-нодах.
+
+Отдельный домен для каждой VPN-ноды не требуется. Agent автоматически определяет
+публичный IP и использует его как `public_host`.
+
+## Настройка `.env`
+
+Создайте `.env`:
 
 ```bash
 cp .env.example .env
-# Оставьте VPN_BACKEND=mock и заполните BOT_TOKEN, BOT_USERNAME
-python -m venv .venv
-. .venv/bin/activate
-pip install -e '.[dev]'
-alembic upgrade head
-uvicorn app.main:app --reload
-python -m app.bot
 ```
 
-Админка: `http://127.0.0.1:8000/admin`.
+Основные параметры:
 
-## Staging deployment
+```env
+DATABASE_URL=postgresql+asyncpg://vpn:vpn@127.0.0.1:5432/vpn
 
-Staging запускается отдельным Compose-стеком из `/opt/sumrak-vpn-test` и не использует
-production `.env`, базу, Xray-контейнер, конфиг или REALITY-ключи. Staging Xray слушает
-отдельный публичный порт `18443`, использует контейнер `sumrak-vpn-test-xray` и конфиг
-`/opt/sumrak-vpn-test/deploy/xray/config.json`.
+BOT_TOKEN=
+BOT_USERNAME=
+SUPPORT_TELEGRAM_URL=https://t.me/username
 
-```bash
-cd /opt/sumrak-vpn-test
-git checkout feature/...
-cp .env.staging.example .env
-# Заполните отдельные BOT_TOKEN, BOT_USERNAME и ADMIN_PASSWORD
-STAGING_PUBLIC_HOST=test.sumrak.digital ./deploy/setup-staging-xray.sh
-docker compose -f compose.staging.yaml up -d --build
-docker compose -f compose.staging.yaml ps
-curl http://127.0.0.1:8001/health
-```
-
-До запуска откройте входящий TCP-порт `18443` в firewall/security group staging-сервера.
-Проверка из внешней сети:
-
-```bash
-nc -vz test.sumrak.digital 18443
-```
-
-Изолированные ресурсы staging:
-
-- web: `sumrak-vpn-test-web`, локальный порт `127.0.0.1:8001`;
-- bot: `sumrak-vpn-test-bot`, использует только отдельный test bot token;
-- xray: `sumrak-vpn-test-xray`, публичный порт `18443`;
-- db: `sumrak-vpn-test-db`, БД `vpn_test`, локальный порт `127.0.0.1:5433`;
-- migrate: `sumrak-vpn-test-migrate`;
-- one-shot sync: `sumrak-vpn-test-xray-sync`;
-- volume: `sumrak-vpn-test-postgres-data`;
-- network: `sumrak-vpn-test-network`.
-
-Настройте reverse proxy для `test.sumrak.digital` на `http://127.0.0.1:8001` и выпустите
-отдельный TLS-сертификат. Production `panel.sumrak.digital` продолжает проксироваться на
-порт `8000`.
-
-`setup-staging-xray.sh` один раз создаёт отдельные `privateKey`, `publicKey` и `shortId`.
-Секретный ключ сохраняется только в staging `config.json`, а публичные параметры и имя
-контейнера записываются в `deploy/xray/reality.env`. Скрипт отказывается перезаписывать
-существующие ключи и использовать production-порт `8443`.
-
-Перед каждым запуском убедитесь, что `/opt/sumrak-vpn-test/.env` содержит отдельный
-тестовый `BOT_TOKEN`. Не копируйте `/opt/sumrak-vpn/.env`, `deploy/xray/config.json` или
-`deploy/xray/reality.env` из production и не запускайте staging через production
-`compose.yaml`.
-
-Управление стеком:
-
-```bash
-docker compose -f compose.staging.yaml logs -f web bot xray
-docker compose -f compose.staging.yaml exec xray xray run -test -config /etc/xray/config.json
-docker compose -f compose.staging.yaml down
-# Удаляет только staging-БД; используйте лишь когда тестовые данные больше не нужны:
-docker compose -f compose.staging.yaml down -v
-```
-
-При первом запуске default-сервер автоматически создаётся как `local_config` из
-staging `XRAY_*` параметров. Одноразовый сервис `staging_xray_sync` также переводит
-существующий default-сервер из прежнего `manual/mock` режима в `local_config` и добавляет
-в staging Xray уже существующие активные UUID. Сервис отказывается работать с именем
-контейнера, отличным от `sumrak-vpn-test-xray`, или с портом `8443`.
-
-В `/admin/servers` проверьте:
-
-- public host: `test.sumrak.digital`;
-- public port: `18443`;
-- management mode: `local_config`;
-- health: `online`.
-
-Переключение Vision/XHTTP через админку изменяет только staging `config.json`, проверяет
-его внутри `sumrak-vpn-test-xray`, перезапускает только этот контейнер и выполняет
-rollback при ошибке. Docker socket монтируется в staging web/bot исключительно для этого
-управления; имя контейнера жёстко задано в staging `reality.env`.
-
-## Telegram Web App
-
-Главное меню бота содержит кнопку «🌑 Открыть Sumrak VPN». Она открывает мобильный
-интерфейс с подпиской, устройствами, инструкциями, реферальной программой и поддержкой.
-Web App использует существующие сервисы и subscription URL, поэтому не меняет Xray,
-админку или логику бота.
-
-Для Telegram нужен публичный HTTPS URL:
-
-```dotenv
 PANEL_PUBLIC_URL=https://panel.sumrak.digital
 WEBAPP_URL=https://panel.sumrak.digital/webapp
+
+ADMIN_USERNAME=admin
+ADMIN_PASSWORD=change-me
+
+TRIAL_DAYS=3
+MAX_DEVICES=10
+BROADCAST_DELAY_SECONDS=0.08
+
+VPN_BACKEND=xray
 ```
 
-API `/api/webapp/*` проверяет подпись Telegram `initData`. Для локальной разработки
-можно задать `WEBAPP_DEV_TELEGRAM_ID` и передавать такой же `X-Dev-Telegram-Id`;
-на рабочем сервере эту настройку оставляйте пустой.
+Обязательно измените пароль PostgreSQL в `compose.yaml` и `DATABASE_URL`, если проект
+доступен не только в изолированной тестовой среде.
 
-## Развертывание на пробном сервере
+## Первый запуск центрального сервера
 
-Нужен Ubuntu/Debian-сервер с публичным IPv4, Docker Compose и свободным TCP-портом
-`8443`. Домен для REALITY не обязателен: клиент может подключаться напрямую по IP.
+Сгенерируйте конфиг локального Xray:
 
 ```bash
-cp .env.example .env
-chmod +x deploy/setup-xray.sh
 ./deploy/setup-xray.sh
 ```
 
 Скрипт создаст:
 
-- `deploy/xray/config.json` с приватным ключом REALITY;
-- `deploy/xray/reality.env` с публичными параметрами для приложения.
+- `deploy/xray/config.json`;
+- `deploy/xray/reality.env`.
 
-Перенесите значения из `deploy/xray/reality.env` в `.env` и заполните:
-
-```dotenv
-BOT_TOKEN=...
-BOT_USERNAME=имя_бота_без_собаки
-SUPPORT_TELEGRAM_URL=https://t.me/support_username
-PANEL_PUBLIC_URL=https://panel.sumrak.digital
-ADMIN_PASSWORD=длинный-случайный-пароль
-XRAY_PUBLIC_HOST=публичный-IP-сервера
-```
-
-Запуск:
+Добавьте значения из `deploy/xray/reality.env` в `.env`, затем запустите сервисы:
 
 ```bash
 docker compose up -d --build
+```
+
+Проверка:
+
+```bash
+docker compose ps
+docker compose logs --tail 100 web
+docker compose logs --tail 100 bot
+docker compose logs --tail 100 xray
 curl http://127.0.0.1:8000/health
-docker compose logs -f xray bot
 ```
 
-Перед запуском `web` и `bot` Compose автоматически выполняет `alembic upgrade head`
-через одноразовый сервис `migrate`.
-
-В firewall должен быть открыт `TCP/8443`. Не открывайте наружу Xray API `10085`,
-PostgreSQL или админку без HTTPS и ограничения доступа.
-
-Если `deploy/xray/config.json` уже был создан старой версией проекта, установите в
-inbound `vless-reality` значение `"port": 8443`, оставьте `serverNames` со значением
-`www.microsoft.com` и удалите `HandlerService` из списка `api.services`. Существующий
-массив `settings.clients` сохраняйте: приложение продолжит управлять им.
-
-## Управление клиентами Xray
-
-Для MVP приложение не использует `HandlerService/AlterInbound`. При создании устройства
-оно добавляет объект клиента в:
-
-```json
-{
-  "id": "UUID устройства",
-  "email": "уникальный ID статистики",
-  "flow": "xtls-rprx-vision"
-}
-```
-
-Путь в конфигурации:
+Админка доступна по адресу:
 
 ```text
-inbounds[tag=vless-reality].settings.clients
+https://PANEL_PUBLIC_URL/admin
 ```
 
-Изменение записывается атомарно под файловой блокировкой. Если список клиентов
-действительно изменился, приложение перезапускает контейнер `vpn-xray` через локальный
-Docker socket. Повторная синхронизация существующего клиента не вызывает перезапуск.
-
-Проверить список клиентов:
-
-```bash
-docker compose exec bot python -c \
-  'import json; c=json.load(open("/data/xray/config.json")); print(next(i for i in c["inbounds"] if i["tag"]=="vless-reality")["settings"]["clients"])'
-```
-
-Проверить конфигурацию и выполнить ручной перезапуск:
-
-```bash
-docker compose run --rm xray run -test -config /etc/xray/config.json
-docker restart vpn-xray
-```
-
-`bot` и `web` имеют доступ к `/var/run/docker.sock`, поэтому админку необходимо закрыть
-от публичного доступа и защитить сильным паролем. Для следующей версии управление
-конфигом и перезапуск следует вынести в отдельный минимальный node-agent.
-
-## VPN-серверы
-
-Раздел `/admin/servers` управляет распределенными VPN-нодами. Первый default-сервер
-автоматически создается из текущих `XRAY_*` параметров, поэтому установка с одной нодой
-продолжает работать без ручной настройки.
-
-Режимы управления:
-
-- `local_config`: приложение изменяет локальный `config.json` и перезапускает `vpn-xray`;
-- `remote_config`: панель по SSH полностью синхронизирует active clients, проверяет
-  candidate-конфиг, применяет его и перезапускает удалённый Docker Compose;
-- `manual`: приложение создает UUID, URI и запись профиля, но администратор вручную
-  добавляет UUID/email в конфиг удаленной ноды;
-- `ssh_future` является совместимым alias для `remote_config`, `agent_future`
-  зарезервирован под будущую автоматизацию.
-
-Для manual-сервера активные UUID и email видны на странице сервера. После их добавления
-в Xray config ноду нужно перезапустить вручную.
-
-### Remote config / SSH
-
-Для рабочих удалённых нод рекомендуется `management_mode=remote_config`. Контейнеры
-`web` и `bot` должны иметь read-only доступ к отдельному SSH private key, путь внутри
-контейнера указывается в `ssh_key_path`. Добавьте fingerprint удалённой ноды в
-`known_hosts`: SSH запускается с `BatchMode=yes` и `StrictHostKeyChecking=yes`.
-
-При каждой синхронизации панель:
-
-1. читает текущий remote `config.json`, сохраняя его REALITY private key и остальные
-   настройки;
-2. собирает `settings.clients` из всех активных `device_server_profiles` сервера;
-3. загружает `config.candidate.json`;
-4. проверяет candidate через отдельный `ghcr.io/xtls/xray-core:26.6.1`;
-5. создаёт `config.json.backup`, применяет candidate и выполняет `docker compose restart`;
-6. при ошибке возвращает backup. Невалидный candidate остаётся для диагностики.
-
-Пример France:
-
-```text
-public_host: 31.56.146.138
-public_port: 443
-transport: xhttp
-management_mode: remote_config
-remote_xray_config_path: /opt/xray-fr/config.json
-remote_compose_dir: /opt/xray-fr
-remote_container_name: xray-fr
-ssh_host: 31.56.146.138
-ssh_port: 22
-ssh_user: root
-ssh_key_path: /run/secrets/france_xray_key
-```
-
-На удалённой ноде должны быть установлены Docker и Docker Compose, а SSH-пользователь
-должен иметь права читать/писать конфиг и управлять Compose-проектом.
-
-Сервер можно удалить только при отсутствии активных профилей. Выключенный сервер
-исчезает из subscription URL, но существующая Xray-нода и уже выданные прямые URI не
-останавливаются.
-
-### Subscription URL
-
-```text
-GET https://panel.sumrak.digital/sub/{device_token}
-GET https://panel.sumrak.digital/sub/{device_token}?base64=true
-```
-
-Обычный ответ содержит один VLESS URI на строку. Вариант `base64=true` возвращает
-base64-compatible список. Новые устройства получают ссылку подписки в Telegram.
-
-### Health check
-
-Bot worker каждые пять минут делает TCP connect к `public_host:public_port` каждой
-активной ноды. Статус `online/offline/error` отображается в админке. Проверку также
-можно запустить вручную со страницы сервера.
-
-## Что будет, если центральный сервер недоступен
-
-Xray-ноды работают независимо от Telegram-бота, админки и PostgreSQL. Уже добавленные
-профили продолжат подключаться и передавать трафик. В период недоступности центрального
-сервера нельзя создавать новые устройства, обновлять subscription URL, проводить
-оплаты или менять конфиги нод. После восстановления управление продолжит работу.
-
-Будущий `sumrak-node-agent` подключится через интерфейс `NodeManager`; заготовки
-`LocalConfigNodeManager`, `ManualNodeManager` и `AgentNodeManager` уже разделяют способы
-управления нодами.
-
-### Vision и XHTTP
-
-В `/admin/servers` транспорт переключается между:
-
-- **Стабильный режим (рекомендуется): XHTTP**: Xray inbound получает `network: xhttp` и
-  `xhttpSettings` (`path` и `mode`), а `flow` удаляется из клиентов и subscription URI.
-- **Быстрый режим (резервный): Vision**: Xray inbound получает актуальный RAW-транспорт
-  (`network: raw`), клиенты получают `flow: xtls-rprx-vision`, а subscription URI
-  содержит совместимый клиентский параметр `type=tcp`;
-
-Новые серверы создаются с `transport=xhttp`, пустым `flow`, `path=/` и `mode=auto`.
-Существующие Vision-серверы миграция не переключает автоматически.
-
-Для `local_config` приложение не заменяет рабочий конфиг сразу. Оно создаёт рядом
-`config.candidate.json`, запускает в контейнере:
-
-```bash
-xray run -test -config /etc/xray/config.candidate.json
-```
-
-После успешной проверки текущий файл сохраняется как `config.json.backup`, candidate
-применяется и контейнер перезапускается. Если контейнер не запустился, приложение
-возвращает backup и повторно запускает Xray. Список `settings.clients`, UUID и закрытый
-REALITY-ключ при переключении транспорта сохраняются.
-
-Успешность `xray run -test` определяется только по exit code команды. stdout/stderr
-показывается как обычный текст. При ошибке `config.candidate.json` остаётся рядом с
-рабочим конфигом для диагностики и его путь выводится в сообщении админки.
-
-### Staging-проверка XHTTP
-
-Переключение сначала проверяйте только на `test.sumrak.digital` с отдельными БД,
-Telegram-ботом, Xray-контейнером и Reality-ключами. Не подключайте production
-`deploy/xray/config.json` к staging-контейнерам.
-
-1. Запустите изолированный staging через `compose.staging.yaml`.
-2. В `/admin/servers` добавьте ноду с `management_mode=manual` и транспортом XHTTP,
-   проверьте subscription URI без изменения Xray.
-3. Поднимите отдельный staging Xray и добавьте ноду `local_config`, указав путь к его
-   config. Переключите её в «Стабильный режим: XHTTP».
-4. Убедитесь, что админка показала успешное сохранение, `config.json.backup` создан,
-   а staging Xray работает.
-5. Создайте новое устройство через staging Telegram-бота и проверьте импорт subscription
-   URL в Hiddify, v2rayN, Nekoray и Happ.
-6. Проверьте Vision и XHTTP на Instagram/Reels/YouTube, затем отдельно проверьте rollback
-   заведомо невалидного staging-конфига.
-
-Автоматические тесты проверяют структуру Vision/XHTTP URI, сохранение клиентов и rollback.
-Импорт и качество трафика в конкретных клиентах остаются обязательным ручным staging-тестом.
-
-## Техподдержка
-
-Укажите публичную Telegram-ссылку:
-
-```dotenv
-SUPPORT_TELEGRAM_URL=https://t.me/username
-```
-
-Бот показывает inline-кнопку поддержки в главном меню, инструкциях и важных ошибках.
-
-## VPN-клиенты и инструкции
-
-Раздел админки `/admin/clients` управляет приложениями, которые бот рекомендует
-пользователям. Для каждой платформы задаются название, ссылка скачивания, инструкция,
-порядок сортировки и активность. Бот показывает только активные записи.
-
-При создании профиля пользователь сначала выбирает платформу. Она сохраняется в
-`devices.platform`, а устройство получает понятное имя: `iPhone 1`, `Android 1` и т.д.
-Профиль выдается только как VLESS-ссылка в отдельном code-блоке, без файла.
-
-## Реферальная программа
-
-Персональная ссылка имеет вид:
-
-```text
-https://t.me/BOT_USERNAME?start=ref_REFERRAL_CODE
-```
-
-При регистрации пригласивший фиксируется один раз и больше не меняется. Первая успешная
-оплата должна вызывать сервисный hook:
-
-```python
-await record_successful_payment(session, user, subscription_days=30)
-```
-
-Он отмечает первую оплату и скидку приглашенного, начисляет пригласившему +15 дней и
-создает запись в `referral_rewards`. До подключения платежки сценарий можно проверить
-кнопкой «Зафиксировать оплату» на странице пользователя в админке. Простая ручная выдача
-дней не считается оплатой.
-
-## Уведомления
-
-Bot worker каждые пять минут проверяет:
-
-- trial: за 24 часа и после окончания;
-- подписку: за 3 дня, за 1 день и после окончания;
-- отключенные после окончания доступа устройства;
-- начисленные реферальные бонусы.
-
-Каждое отправленное событие записывается в `notification_log`; ключ включает дату
-окончания, поэтому после продления уведомления рассчитываются заново и не дублируются.
-
-## Рассылки
-
-Раздел `/admin/broadcasts` позволяет создать черновик, увидеть preview и подтвердить
-отправку. Поддерживаются текст и Telegram `file_id`/URL картинки. Доступные аудитории:
-все пользователи, активные, с истекающей подпиской и один пользователь.
-
-После подтверждения создаются `broadcast_recipients`. Bot worker отправляет сообщения с
-задержкой `BROADCAST_DELAY_SECONDS`, записывает успешные отправки и ошибки и продолжает
-работу, если пользователь заблокировал бота.
+FastAPI слушает порт `8000`. Перед ним необходимо настроить HTTPS reverse proxy.
 
 ## Миграции БД
 
-Схема управляется Alembic:
+Compose автоматически запускает `alembic upgrade head` перед `web` и `bot`.
+
+Ручное применение:
 
 ```bash
 docker compose run --rm migrate
-# или локально:
+```
+
+Локально:
+
+```bash
 alembic upgrade head
 ```
 
-Миграция добавляет реферальные поля, `devices.platform`, `notification_log`,
-`vpn_clients`, `broadcasts` и `broadcast_recipients`. Также она снимает `NOT NULL` со
-старых WireGuard-полей `public_key` и `assigned_ip`, если они сохранились в базе.
+Не изменяйте production-схему вручную через SQL. Перед обновлением production сделайте
+резервную копию PostgreSQL.
 
-## Выбор REALITY target
+## Telegram-бот
 
-По умолчанию используется `www.microsoft.com:443`. Перед эксплуатацией target нужно
-проверить с сервера и выбрать стабильный HTTPS-сайт, желательно в том же ASN или близком
-сетевом окружении. Target не должен резолвиться в IP самого VPN-сервера.
+Команды:
 
-Изменить target при генерации:
+- `/start` — старт;
+- `/privacy` — политика конфиденциальности;
+- `/terms` — пользовательское соглашение.
 
-```bash
-REALITY_TARGET=example.com:443 REALITY_SERVER_NAME=example.com ./deploy/setup-xray.sh
+Главное меню:
+
+- получить профиль;
+- мои устройства;
+- подписка;
+- реферальная программа;
+- инструкции по подключению;
+- техподдержка.
+
+Бот выдаёт subscription URL:
+
+```text
+https://PANEL_PUBLIC_URL/sub/{device_token}
 ```
 
-## Автоматическое подключение VPN-нод
+Subscription содержит по одному VLESS URI на каждый активный сервер. Также доступен
+base64-формат:
 
-В `/admin/servers` нажмите «Подключить новую ноду», укажите название и код страны.
-Панель создаст одноразовый token со сроком действия 30 минут и покажет команду:
+```text
+GET /sub/{device_token}?base64=true
+```
+
+## Telegram Web App
+
+Web App доступен по адресу:
+
+```text
+https://PANEL_PUBLIC_URL/webapp
+```
+
+Укажите этот URL как Telegram Menu Button. Для локальной разработки можно использовать
+`WEBAPP_DEV_TELEGRAM_ID`, но его нельзя включать в production.
+
+## Подключение новой VPN-ноды
+
+1. Откройте `/admin/servers`.
+2. Нажмите «Подключить новую ноду».
+3. Укажите название и код страны.
+4. Выполните показанную команду от `root` на чистом VPN-сервере:
 
 ```bash
 curl -sSL https://PANEL_PUBLIC_URL/node/install.sh | bash -s -- NODE_TOKEN
 ```
 
-Запустите её от `root` на чистом Linux-сервере с публичным TCP-портом `443`. Установщик
-поставит Docker и Compose plugin, создаст отдельные REALITY-ключи, поднимет контейнеры
-`sumrak-node-xray` и `sumrak-node-agent`, затем зарегистрирует ноду в панели.
-Образ agent собирается из `deploy/node/Dockerfile.agent` с Docker CLI и
-`ca-certificates`; установщик проверяет `docker version` и перезапуск Xray через
-примонтированный `/var/run/docker.sock`.
+Установщик:
 
-Новые agent-ноды используют закреплённый Xray `26.6.1` и рабочую post-quantum XHTTP
-схему. Установщик автоматически генерирует VLESS encryption/decryption через
-`xray vlessenc`, ML-DSA65 identity через `xray mldsa65`, REALITY X25519 identity и
-shortId. Эти значения сохраняются в `vpn_servers`; subscription URI получает `pqv`,
-`spx`, padding и XHTTP extra-параметры. Старые серверы без `pq_enabled` продолжают
-работать в legacy-режиме.
+1. устанавливает Docker и Compose plugin при необходимости;
+2. создаёт `/opt/sumrak-node`;
+3. использует Xray Core `26.6.1`;
+4. генерирует X25519 REALITY keys и shortId;
+5. генерирует VLESS encryption/decryption через `xray vlessenc`;
+6. генерирует ML-DSA65 identity через `xray mldsa65`;
+7. создаёт рабочий PQ-XHTTP config;
+8. запускает Xray и agent;
+9. регистрирует ноду в панели;
+10. синхронизирует активные UUID.
 
-Agent каждые 30 секунд получает активные UUID через HTTPS, собирает
-`config.candidate.json`, проверяет его через `xray run -test` и только после успешной
-проверки применяет конфиг. При ошибке рабочий конфиг восстанавливается из backup.
-Если agent не обращался к панели больше двух минут, нода отображается как offline.
+Agent каждые 30 секунд получает список активных клиентов. При изменении он:
 
-В админке для agent-ноды доступны время последнего обращения и синхронизации, версия,
-число клиентов и последняя ошибка. Режимы `local_config`, `remote_config` и `manual`
-продолжают работать независимо от agent mode.
+1. создаёт `config.candidate.json`;
+2. проверяет его через `xray run -test`;
+3. сохраняет backup;
+4. применяет config;
+5. перезапускает только `sumrak-node-xray`;
+6. восстанавливает backup при ошибке.
 
-## Следующие шаги перед публичным запуском
-
-- добавить несколько Xray-узлов и автоматическое переключение;
-- добавить дополнительные транспорты;
-- провести тесты скорости и доступности на российских мобильных и домашних операторах;
-- добавить резервные копии PostgreSQL и мониторинг;
-- поставить HTTPS reverse proxy перед админкой и ограничить доступ.
-
-Перед обновлением production-базы сделайте резервную копию PostgreSQL и примените
-`alembic upgrade head`.
-
-После обновления кода пересоберите центральные сервисы:
+Проверка после установки:
 
 ```bash
-docker compose run --rm migrate
-docker compose up -d --build web bot
+docker ps
+docker logs --tail 100 sumrak-node-agent
+docker logs --tail 100 sumrak-node-xray
+docker run --rm \
+  -v /opt/sumrak-node/config.json:/etc/xray/config.json:ro \
+  ghcr.io/xtls/xray-core:26.6.1 run -test -config /etc/xray/config.json
 ```
 
-Для проверки новой схемы создайте новую agent-ноду через `/admin/servers`. Уже
-установленные legacy agent-ноды автоматически не переводятся на PQ-XHTTP.
+Ожидаемый результат:
+
+- оба контейнера имеют статус `Up`;
+- agent пишет `sync completed: clients=N`;
+- Xray возвращает `Configuration OK`;
+- в админке нода отображается как `online`.
+
+## Повторная установка ноды
+
+Перед повторной установкой очистите старый deployment на самой VPN-ноде. Новая
+регистрация автоматически выключает предыдущую активную agent-запись той же физической
+машины.
+
+Панель сравнивает не только строки `public_host`, но и IP-адреса, полученные через DNS.
+Поэтому записи `franc.sumrak.digital` и `31.56.146.138` распознаются как одна нода.
+
+В subscription URL остаётся только новая активная запись.
+
+## Режимы управления серверами
+
+- `agent` — рекомендуемый режим для новых удалённых нод;
+- `local_config` — управление локальным config и контейнером Xray;
+- `remote_config` — управление удалённым config по SSH;
+- `manual` — панель создаёт URI и UUID, но не управляет Xray config.
+
+`agent_future` и `ssh_future` поддерживаются как совместимые alias.
+
+### Agent
+
+Рекомендуемый режим. Не требует ручного SSH после установки. Agent сообщает:
+
+- `last_seen_at`;
+- `last_sync_at`;
+- версию;
+- количество клиентов;
+- последнюю ошибку.
+
+Если agent не обращался к панели больше двух минут, нода отображается как `offline`.
+
+### Local config
+
+Панель изменяет локальный `config.json`, проверяет candidate и перезапускает локальный
+контейнер Xray.
+
+### Remote config / SSH
+
+Панель подключается к удалённой машине по SSH, загружает candidate, проверяет его через
+`ghcr.io/xtls/xray-core:26.6.1`, применяет config и выполняет rollback при ошибке.
+
+Для этого режима заполните:
+
+- `ssh_host`;
+- `ssh_port`;
+- `ssh_user`;
+- `ssh_key_path`;
+- `remote_xray_config_path`;
+- `remote_compose_dir`;
+- `remote_container_name`.
+
+### Manual
+
+Панель не изменяет удалённый Xray config. UUID и email нужно добавлять вручную.
+Используйте этот режим только для диагностики или внешних систем управления.
+
+## PQ-XHTTP
+
+Новые agent-ноды используют:
+
+- `network: xhttp`;
+- `security: reality`;
+- post-quantum VLESS encryption/decryption;
+- `mldsa65Seed` на сервере;
+- `pqv` и `spx` в URI;
+- XHTTP padding и дополнительные параметры;
+- REALITY target `web.max.ru:443`;
+- fingerprint `firefox`.
+
+Старые серверы без `pq_enabled` продолжают работать в legacy-режиме и автоматически не
+переводятся на PQ-XHTTP.
+
+Vision остаётся резервным транспортом и использует `flow=xtls-rprx-vision`.
+
+## Управление и удаление серверов
+
+Выключенный сервер исчезает из новых subscription URL.
+
+Кнопка «Удалить»:
+
+- удаляет выбранную запись `vpn_servers`;
+- удаляет только её `device_server_profiles`;
+- не вызывает revoke, sync или restart;
+- не обращается к физической VPN-ноде;
+- не затрагивает другие online-серверы, даже если они находятся на том же IP.
+
+Это позволяет безопасно удалять старые выключенные записи с историческими профилями.
+
+Перед удалением проверьте, что выбрана нужная запись. Удаление активной записи уберёт её
+из subscription URL, но не остановит контейнер Xray на удалённом сервере.
+
+## Health check
+
+Для активных серверов выполняется TCP-проверка `public_host:public_port`.
+
+Для agent-нод дополнительно учитывается время последнего обращения agent:
+
+- `online` — нода доступна и agent регулярно синхронизируется;
+- `offline` — порт недоступен или agent давно не обращался;
+- `error` — agent сообщил ошибку.
+
+Статус можно проверить вручную со страницы сервера.
+
+## Пользователи и подписки
+
+Админка позволяет:
+
+- выдавать дни подписки;
+- отмечать первую успешную оплату;
+- блокировать пользователя;
+- отзывать устройства;
+- смотреть trial, подписку и статистику устройств.
+
+Trial и лимит устройств сохраняются при добавлении новых VPN-серверов.
+
+## Реферальная программа
+
+- пользователь получает персональную ссылку;
+- приглашённый сохраняет связь с пригласившим через `/start ref_CODE`;
+- пригласивший получает `+15` дней после первой отмеченной оплаты приглашённого;
+- повторное начисление блокируется;
+- история хранится в PostgreSQL.
+
+## VPN-клиенты и инструкции
+
+Раздел `/admin/clients` управляет рекомендуемыми приложениями и инструкциями:
+
+- платформа;
+- название;
+- описание;
+- download URL;
+- текст инструкции;
+- порядок;
+- активность.
+
+Бот показывает только активные приложения.
+
+## Уведомления
+
+Bot worker отправляет уведомления:
+
+- trial: за 24 часа и после окончания;
+- подписка: за 3 дня, за 1 день и после окончания;
+- отключение устройств после окончания доступа;
+- регистрация и оплата приглашённого пользователя.
+
+Отправленные события записываются в `notification_log`, чтобы избежать дублей.
+
+## Рассылки
+
+Раздел `/admin/broadcasts` поддерживает:
+
+- всех пользователей;
+- только активных;
+- пользователей с истекающей подпиской;
+- одного пользователя;
+- текст;
+- Telegram `file_id` или URL изображения;
+- preview и подтверждение.
+
+Рассылка выполняется с задержкой `BROADCAST_DELAY_SECONDS`. Ошибки отдельных получателей
+записываются и не останавливают всю рассылку.
+
+## Staging
+
+Staging использует отдельные:
+
+- PostgreSQL;
+- Telegram-бот;
+- Xray config и REALITY keys;
+- Xray-контейнер;
+- порт `18443`;
+- Docker network и volume.
+
+Подготовка:
+
+```bash
+cp .env.staging.example .env
+./deploy/setup-staging-xray.sh
+docker compose -f compose.staging.yaml up -d --build
+```
+
+Проверка:
+
+```bash
+docker compose -f compose.staging.yaml ps
+docker compose -f compose.staging.yaml logs --tail 100 web bot xray
+```
+
+Не копируйте production-ключи и production-базу в staging.
+
+## Обновление
+
+Центральный сервер:
+
+```bash
+git pull
+docker compose run --rm migrate
+docker compose pull xray
+docker compose up -d --build web bot xray
+docker compose ps
+```
+
+После изменений installer или agent создавайте новую agent-ноду через админку.
+Установленные agent-контейнеры самостоятельно не скачивают новую версию `agent.py`.
+
+## Диагностика
+
+Центральный сервер:
+
+```bash
+docker compose ps
+docker compose logs --tail 200 web
+docker compose logs --tail 200 bot
+docker compose logs --tail 200 xray
+docker compose run --rm migrate
+```
+
+Agent-нода:
+
+```bash
+cd /opt/sumrak-node
+docker compose ps
+docker logs --tail 200 sumrak-node-agent
+docker logs --tail 200 sumrak-node-xray
+ss -lntp | grep ':443 '
+```
+
+Проверка Xray config:
+
+```bash
+docker run --rm \
+  -v /opt/sumrak-node/config.json:/etc/xray/config.json:ro \
+  ghcr.io/xtls/xray-core:26.6.1 run -test -config /etc/xray/config.json
+```
+
+Если профиль импортируется, но интернет не работает, сначала проверьте:
+
+1. в subscription осталась только одна активная запись физической ноды;
+2. agent успешно получил клиентов;
+3. UUID профиля присутствует в `/opt/sumrak-node/config.json`;
+4. Xray config проходит `run -test`;
+5. Xray-логи содержат `accepted ... [vless-reality >> direct]`.
+
+## Тесты
+
+Установите dev-зависимости:
+
+```bash
+python3 -m pip install -e '.[dev]'
+```
+
+Запуск:
+
+```bash
+DATABASE_URL=sqlite+aiosqlite:// pytest -q
+ruff check app tests alembic
+git diff --check
+```
+
+## Безопасность
+
+- используйте HTTPS для панели, Web App, subscription и node API;
+- установите сильный `ADMIN_PASSWORD`;
+- ограничьте доступ к админке;
+- не публикуйте `.env`, PostgreSQL-пароли, node token, agent token и REALITY private keys;
+- node enrollment token одноразовый и действует 30 минут;
+- `/var/run/docker.sock` предоставляет высокий уровень доступа к Docker host;
+- регулярно создавайте резервные копии PostgreSQL;
+- обновляйте зависимости и Xray только после проверки в staging.
