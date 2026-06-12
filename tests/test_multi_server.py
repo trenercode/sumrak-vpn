@@ -10,6 +10,7 @@ from app.config import Settings
 from app.db import get_session
 from app.main import app
 from app.models import Base, DeviceServerProfile, VpnServer
+from app.admin import server_delete
 from app.nodes import (
     NodeManagerRegistry,
     RemoteConfigNodeManager,
@@ -295,6 +296,41 @@ async def test_new_default_server_uses_xhttp():
         assert item.flow == ""
         assert item.xhttp_path == "/"
         assert item.xhttp_mode == "auto"
+    await engine.dispose()
+
+
+async def test_delete_server_removes_only_selected_server_profiles():
+    engine, sessions = await database()
+    async with sessions() as session:
+        first = server("France old", "FR", 100)
+        second = server("France online", "FR", 100)
+        session.add_all([first, second])
+        await session.flush()
+        first_profile = DeviceServerProfile(
+            device_id="device-old",
+            server_id=first.id,
+            credential="credential-old",
+            client_email="old@vpn.local",
+            uri="vless://old",
+            is_active=True,
+        )
+        second_profile = DeviceServerProfile(
+            device_id="device-online",
+            server_id=second.id,
+            credential="credential-online",
+            client_email="online@vpn.local",
+            uri="vless://online",
+            is_active=True,
+        )
+        session.add_all([first_profile, second_profile])
+        await session.commit()
+
+        response = await server_delete(first.id, session)
+        assert response.status_code == 303
+        assert await session.get(VpnServer, first.id) is None
+        assert await session.get(DeviceServerProfile, first_profile.id) is None
+        assert await session.get(VpnServer, second.id) is not None
+        assert await session.get(DeviceServerProfile, second_profile.id) is not None
     await engine.dispose()
 
 

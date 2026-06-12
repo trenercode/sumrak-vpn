@@ -470,14 +470,6 @@ async def server_delete(server_id: str, session: AsyncSession = Depends(get_sess
     server = await session.get(VpnServer, server_id)
     if server is None:
         raise HTTPException(404)
-    active_profile = await session.scalar(
-        select(DeviceServerProfile.id).where(
-            DeviceServerProfile.server_id == server_id,
-            DeviceServerProfile.is_active.is_(True),
-        )
-    )
-    if active_profile:
-        raise HTTPException(409, "Server has active devices")
     profiles = list(
         await session.scalars(
             select(DeviceServerProfile).where(DeviceServerProfile.server_id == server_id)

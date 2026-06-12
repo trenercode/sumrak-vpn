@@ -77,7 +77,7 @@
 <form class="inline" method="post" action="/admin/servers/{{ server.id }}/toggle"><button>{{ "Выключить" if server.is_active else "Включить" }}</button></form>
 <form class="inline" method="post" action="/admin/servers/{{ server.id }}/default"><button>Сделать default</button></form>
 <form class="inline" method="post" action="/admin/servers/{{ server.id }}/health"><button>Проверить статус</button></form>
-<form class="inline" method="post" action="/admin/servers/{{ server.id }}/delete"><button class="danger">Удалить</button></form>
+<form class="inline" method="post" action="/admin/servers/{{ server.id }}/delete" onsubmit="return confirm('Удалить сервер и только его профили из панели? Другие серверы затронуты не будут.')"><button class="danger">Удалить</button></form>
 <h2>Активные профили</h2>
 <table><tr><th>Device ID</th><th>UUID</th><th>Email</th></tr>
 {% for profile in profiles %}<tr><td>{{ profile.device_id }}</td><td>{{ profile.credential }}</td><td>{{ profile.client_email }}</td></tr>{% endfor %}
