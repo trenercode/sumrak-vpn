@@ -2,7 +2,7 @@ name: sumrak-vpn-test
 
 services:
   xray:
-    image: ghcr.io/xtls/xray-core:latest
+    image: ghcr.io/xtls/xray-core:26.6.1
     container_name: sumrak-vpn-test-xray
     restart: unless-stopped
     command: run -config /etc/xray/config.json

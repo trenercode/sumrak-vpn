@@ -282,7 +282,7 @@ docker restart vpn-xray
    настройки;
 2. собирает `settings.clients` из всех активных `device_server_profiles` сервера;
 3. загружает `config.candidate.json`;
-4. проверяет candidate через отдельный `ghcr.io/xtls/xray-core:latest`;
+4. проверяет candidate через отдельный `ghcr.io/xtls/xray-core:26.6.1`;
 5. создаёт `config.json.backup`, применяет candidate и выполняет `docker compose restart`;
 6. при ошибке возвращает backup. Невалидный candidate остаётся для диагностики.
 
@@ -490,6 +490,13 @@ curl -sSL https://PANEL_PUBLIC_URL/node/install.sh | bash -s -- NODE_TOKEN
 `ca-certificates`; установщик проверяет `docker version` и перезапуск Xray через
 примонтированный `/var/run/docker.sock`.
 
+Новые agent-ноды используют закреплённый Xray `26.6.1` и рабочую post-quantum XHTTP
+схему. Установщик автоматически генерирует VLESS encryption/decryption через
+`xray vlessenc`, ML-DSA65 identity через `xray mldsa65`, REALITY X25519 identity и
+shortId. Эти значения сохраняются в `vpn_servers`; subscription URI получает `pqv`,
+`spx`, padding и XHTTP extra-параметры. Старые серверы без `pq_enabled` продолжают
+работать в legacy-режиме.
+
 Agent каждые 30 секунд получает активные UUID через HTTPS, собирает
 `config.candidate.json`, проверяет его через `xray run -test` и только после успешной
 проверки применяет конфиг. При ошибке рабочий конфиг восстанавливается из backup.
@@ -509,3 +516,13 @@ Agent каждые 30 секунд получает активные UUID чер
 
 Перед обновлением production-базы сделайте резервную копию PostgreSQL и примените
 `alembic upgrade head`.
+
+После обновления кода пересоберите центральные сервисы:
+
+```bash
+docker compose run --rm migrate
+docker compose up -d --build web bot
+```
+
+Для проверки новой схемы создайте новую agent-ноду через `/admin/servers`. Уже
+установленные legacy agent-ноды автоматически не переводятся на PQ-XHTTP.

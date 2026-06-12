@@ -263,22 +263,44 @@ class XrayBackend(VpnBackend):
             else:
                 client["flow"] = server.flow or "xtls-rprx-vision"
         inbound.setdefault("settings", {})["clients"] = rendered_clients
+        inbound["settings"]["decryption"] = (
+            server.vless_decryption if getattr(server, "pq_enabled", False) else "none"
+        )
 
         inbound["port"] = server.public_port
+        inbound["sniffing"] = {
+            "enabled": not getattr(server, "pq_enabled", False),
+            "destOverride": ["http", "tls", "quic"],
+        }
         stream = inbound.setdefault("streamSettings", {})
         stream["network"] = "xhttp" if is_xhttp else "raw"
         stream["security"] = "reality"
         if is_xhttp:
-            stream["xhttpSettings"] = {
+            xhttp_settings = {
+                "host": "",
                 "path": server.xhttp_path or "/",
                 "mode": server.xhttp_mode or "auto",
             }
+            if getattr(server, "pq_enabled", False):
+                xhttp_settings.update(
+                    {
+                        "xPaddingBytes": "100-1000",
+                        "scMaxEachPostBytes": "1000000",
+                        "scMaxBufferedPosts": 30,
+                        "scStreamUpServerSecs": "20-80",
+                    }
+                )
+            stream["xhttpSettings"] = xhttp_settings
         else:
             stream.pop("xhttpSettings", None)
         reality = stream.setdefault("realitySettings", {})
         reality["target"] = server.reality_target
         reality["serverNames"] = [server.reality_server_name]
         reality["shortIds"] = [server.reality_short_id]
+        if getattr(server, "pq_enabled", False):
+            reality["mldsa65Seed"] = server.reality_mldsa65_seed
+        else:
+            reality.pop("mldsa65Seed", None)
         return config
 
     async def apply_server_config(self, server) -> None:

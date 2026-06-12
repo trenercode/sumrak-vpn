@@ -88,8 +88,13 @@ def test_node_install_register_sync_and_report():
             assert "password \\(publickey\\)" in install.text
             assert "/public|password/" not in install.text
             assert "Could not parse REALITY private/public key" in install.text
+            assert "ghcr.io/xtls/xray-core:26.6.1" in install.text
+            assert "vlessenc" in install.text
+            assert "mldsa65" in install.text
+            assert '"mldsa65Seed":"$MLDSA_SEED"' in install.text
+            assert '"decryption":"$VLESS_DECRYPTION"' in install.text
             assert 'printf \'%s\\n\' "$KEYS" >&2' not in install.text
-            assert '"sniffing":{"enabled":true' in install.text
+            assert '"sniffing":{"enabled":false' in install.text
             assert '"tag":"blocked","protocol":"blackhole"' in install.text
             dockerfile = client.get("/node/Dockerfile.agent")
             assert dockerfile.status_code == 200
@@ -110,6 +115,11 @@ def test_node_install_register_sync_and_report():
                 "reality_server_name": "www.microsoft.com",
                 "xhttp_path": "/",
                 "xhttp_mode": "auto",
+                "vless_encryption": "client-encryption",
+                "vless_decryption": "server-decryption",
+                "reality_mldsa65_seed": "mldsa-seed",
+                "reality_mldsa65_verify": "mldsa-verify",
+                "reality_spider_x": "/",
                 "agent_token": "agent-secret",
             }
             response = client.post("/api/node/register", json=payload)
@@ -123,6 +133,9 @@ def test_node_install_register_sync_and_report():
                 )
                 assert server.management_mode == "agent"
                 assert server.transport == "xhttp"
+                assert server.pq_enabled
+                assert server.vless_encryption == "client-encryption"
+                assert server.reality_mldsa65_verify == "mldsa-verify"
                 assert not old_server.is_active
                 profile = await session.scalar(
                     select(DeviceServerProfile).where(DeviceServerProfile.server_id == server.id)
@@ -134,6 +147,8 @@ def test_node_install_register_sync_and_report():
             assert sync.status_code == 200
             assert len(sync.json()["clients"]) == 1
             assert sync.json()["clients"][0]["flow"] == ""
+            assert sync.json()["pq_enabled"] is True
+            assert sync.json()["vless_decryption"] == "server-decryption"
             assert client.get("/api/node/sync").status_code == 401
             report = client.post(
                 "/api/node/report",
@@ -260,7 +275,11 @@ def test_agent_renders_xhttp_and_vision_candidates(tmp_path, monkeypatch):
     inbound = xhttp["inbounds"][0]
     assert inbound["settings"]["clients"] == [{"id": "uuid", "email": "device@test"}]
     assert inbound["streamSettings"]["network"] == "xhttp"
-    assert inbound["streamSettings"]["xhttpSettings"] == {"path": "/vpn", "mode": "auto"}
+    assert inbound["streamSettings"]["xhttpSettings"] == {
+        "host": "",
+        "path": "/vpn",
+        "mode": "auto",
+    }
     assert inbound["streamSettings"]["realitySettings"]["privateKey"] == "private-key"
     assert inbound["sniffing"] == {
         "enabled": True,
@@ -271,6 +290,22 @@ def test_agent_renders_xhttp_and_vision_candidates(tmp_path, monkeypatch):
         {"tag": "blocked", "protocol": "blackhole"},
     ]
 
+    desired.update(
+        {
+            "pq_enabled": True,
+            "vless_decryption": "server-decryption",
+            "reality_mldsa65_seed": "mldsa-seed",
+        }
+    )
+    pq_xhttp = json.loads(runtime.render(desired).read_text())
+    inbound = pq_xhttp["inbounds"][0]
+    assert inbound["settings"]["decryption"] == "server-decryption"
+    assert inbound["sniffing"]["enabled"] is False
+    assert inbound["streamSettings"]["realitySettings"]["mldsa65Seed"] == "mldsa-seed"
+    assert inbound["streamSettings"]["xhttpSettings"]["xPaddingBytes"] == "100-1000"
+    assert inbound["streamSettings"]["xhttpSettings"]["scMaxEachPostBytes"] == "1000000"
+
+    desired["pq_enabled"] = False
     desired["transport"] = "vision"
     vision = json.loads(runtime.render(desired).read_text())
     inbound = vision["inbounds"][0]

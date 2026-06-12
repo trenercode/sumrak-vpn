@@ -264,6 +264,22 @@ def test_render_uri_uses_xhttp_without_vision_flow():
     assert "headerType=" not in uri
 
 
+def test_render_uri_uses_post_quantum_xhttp_parameters():
+    item = server("PQ XHTTP", "FR", 10)
+    item.transport = "xhttp"
+    item.flow = ""
+    item.pq_enabled = True
+    item.vless_encryption = "mlkem-client-encryption"
+    item.reality_mldsa65_verify = "mldsa-verify"
+    item.reality_spider_x = "/"
+    uri = render_server_uri(item, "11111111-1111-1111-1111-111111111111")
+    assert "encryption=mlkem-client-encryption" in uri
+    assert "pqv=mldsa-verify" in uri
+    assert "spx=%2F" in uri
+    assert "x_padding_bytes=100-1000" in uri
+    assert "scMaxEachPostBytes" in uri
+
+
 async def test_new_default_server_uses_xhttp():
     engine, sessions = await database()
     async with sessions() as session:

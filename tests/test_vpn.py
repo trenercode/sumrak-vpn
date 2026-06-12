@@ -150,8 +150,50 @@ def test_build_xhttp_config_preserves_clients_and_removes_flow(tmp_path):
     inbound = result["inbounds"][0]
     assert inbound["settings"]["clients"] == [{"id": "existing-uuid", "email": "existing@test"}]
     assert inbound["streamSettings"]["network"] == "xhttp"
-    assert inbound["streamSettings"]["xhttpSettings"] == {"path": "/sumrak", "mode": "auto"}
+    assert inbound["streamSettings"]["xhttpSettings"] == {
+        "host": "",
+        "path": "/sumrak",
+        "mode": "auto",
+    }
     assert inbound["streamSettings"]["realitySettings"]["privateKey"] == "keep-private-key"
+
+
+def test_build_post_quantum_xhttp_config(tmp_path):
+    config = xray_config()
+    config["inbounds"][0]["streamSettings"] = {
+        "realitySettings": {"privateKey": "keep-private-key"}
+    }
+    config_path = tmp_path / "config.json"
+    config_path.write_text(json.dumps(config))
+    backend = XrayBackend(Settings(xray_config_path=str(config_path)))
+    server = SimpleNamespace(
+        transport="xhttp",
+        flow="",
+        public_port=443,
+        xhttp_path="/",
+        xhttp_mode="auto",
+        reality_target="web.max.ru:443",
+        reality_server_name="web.max.ru",
+        reality_short_id="0123456789abcdef",
+        pq_enabled=True,
+        vless_decryption="server-decryption",
+        reality_mldsa65_seed="mldsa-seed",
+    )
+
+    candidate, _ = backend._build_server_config(server)
+    inbound = json.loads(candidate.read_text())["inbounds"][0]
+    assert inbound["settings"]["decryption"] == "server-decryption"
+    assert inbound["sniffing"]["enabled"] is False
+    assert inbound["streamSettings"]["realitySettings"]["mldsa65Seed"] == "mldsa-seed"
+    assert inbound["streamSettings"]["xhttpSettings"] == {
+        "host": "",
+        "path": "/",
+        "mode": "auto",
+        "xPaddingBytes": "100-1000",
+        "scMaxEachPostBytes": "1000000",
+        "scMaxBufferedPosts": 30,
+        "scStreamUpServerSecs": "20-80",
+    }
 
 
 def test_build_vision_config_uses_raw_and_preserves_clients(tmp_path):

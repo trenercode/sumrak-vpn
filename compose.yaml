@@ -1,6 +1,6 @@
 services:
   xray:
-    image: ghcr.io/xtls/xray-core:latest
+    image: ghcr.io/xtls/xray-core:26.6.1
     container_name: vpn-xray
     restart: unless-stopped
     command: run -config /etc/xray/config.json

@@ -6,7 +6,8 @@ import time
 import urllib.request
 from pathlib import Path
 
-VERSION = "0.1.3"
+VERSION = "0.2.0"
+XRAY_IMAGE = os.getenv("XRAY_IMAGE", "ghcr.io/xtls/xray-core:26.6.1")
 PANEL_URL = os.environ["PANEL_URL"].rstrip("/")
 AGENT_TOKEN = os.environ["AGENT_TOKEN"]
 CONFIG_PATH = Path(os.getenv("XRAY_CONFIG_PATH", "/data/config.json"))
@@ -47,24 +48,42 @@ def render(desired: dict) -> Path:
         else:
             client["flow"] = "xtls-rprx-vision"
     inbound.setdefault("settings", {})["clients"] = clients
+    inbound["settings"]["decryption"] = (
+        desired["vless_decryption"] if desired.get("pq_enabled") else "none"
+    )
     inbound["sniffing"] = {
-        "enabled": True,
+        "enabled": not desired.get("pq_enabled", False),
         "destOverride": ["http", "tls", "quic"],
     }
     stream = inbound.setdefault("streamSettings", {})
     stream["network"] = "xhttp" if is_xhttp else "raw"
     stream["security"] = "reality"
     if is_xhttp:
-        stream["xhttpSettings"] = {
+        xhttp_settings = {
+            "host": "",
             "path": desired["xhttp_path"] or "/",
             "mode": desired["xhttp_mode"] or "auto",
         }
+        if desired.get("pq_enabled"):
+            xhttp_settings.update(
+                {
+                    "xPaddingBytes": "100-1000",
+                    "scMaxEachPostBytes": "1000000",
+                    "scMaxBufferedPosts": 30,
+                    "scStreamUpServerSecs": "20-80",
+                }
+            )
+        stream["xhttpSettings"] = xhttp_settings
     else:
         stream.pop("xhttpSettings", None)
     reality = stream.setdefault("realitySettings", {})
     reality["target"] = desired["reality_target"]
     reality["serverNames"] = [desired["reality_server_name"]]
     reality["shortIds"] = [desired["reality_short_id"]]
+    if desired.get("pq_enabled"):
+        reality["mldsa65Seed"] = desired["reality_mldsa65_seed"]
+    else:
+        reality.pop("mldsa65Seed", None)
     outbounds = [
         outbound
         for outbound in config.get("outbounds", [])
@@ -89,7 +108,7 @@ def apply(candidate: Path) -> None:
             "--rm",
             "-v",
             f"{host_candidate}:/etc/xray/config.json:ro",
-            "ghcr.io/xtls/xray-core:latest",
+            XRAY_IMAGE,
             "run",
             "-test",
             "-config",

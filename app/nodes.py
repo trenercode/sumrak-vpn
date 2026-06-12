@@ -31,7 +31,7 @@ def server_label(server: VpnServer) -> str:
 def render_server_uri(server: VpnServer, credential: str) -> str:
     is_xhttp = server.transport == "xhttp"
     parameters = {
-        "encryption": "none",
+        "encryption": server.vless_encryption if server.pq_enabled else "none",
         "security": "reality",
         "sni": server.reality_server_name,
         "fp": server.fingerprint,
@@ -41,6 +41,21 @@ def render_server_uri(server: VpnServer, credential: str) -> str:
     }
     if is_xhttp:
         parameters.update({"path": server.xhttp_path or "/", "mode": server.xhttp_mode or "auto"})
+        if server.pq_enabled:
+            parameters.update(
+                {
+                    "pqv": server.reality_mldsa65_verify,
+                    "spx": server.reality_spider_x or "/",
+                    "extra": json.dumps(
+                        {
+                            "scMaxEachPostBytes": "1000000",
+                            "xPaddingBytes": "100-1000",
+                        },
+                        separators=(",", ":"),
+                    ),
+                    "x_padding_bytes": "100-1000",
+                }
+            )
     else:
         parameters.update({"flow": server.flow or "xtls-rprx-vision", "headerType": "none"})
     query = urlencode(parameters)
@@ -182,7 +197,7 @@ class RemoteConfigNodeManager(NodeManager):
         validation = (
             "docker run --rm "
             f"-v {shlex.quote(candidate)}:/etc/xray/config.json:ro "
-            "ghcr.io/xtls/xray-core:latest run -test -config /etc/xray/config.json"
+            "ghcr.io/xtls/xray-core:26.6.1 run -test -config /etc/xray/config.json"
         )
         try:
             await self._ssh(server, validation)

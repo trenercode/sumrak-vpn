@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-XRAY_IMAGE="${XRAY_IMAGE:-ghcr.io/xtls/xray-core:latest}"
+XRAY_IMAGE="${XRAY_IMAGE:-ghcr.io/xtls/xray-core:26.6.1}"
 REALITY_TARGET="${REALITY_TARGET:-www.microsoft.com:443}"
 REALITY_SERVER_NAME="${REALITY_SERVER_NAME:-www.microsoft.com}"
 XRAY_PORT="${XRAY_PORT:-8443}"

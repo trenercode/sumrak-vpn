@@ -41,6 +41,12 @@
       <option value="{{ value }}" {{ "selected" if server.xhttp_mode == value }}>{{ label }}</option>
       {% endfor %}
     </select></p>
+    <p><label><input type="checkbox" name="pq_enabled" {{ "checked" if server.pq_enabled }}> Post-quantum XHTTP</label></p>
+    <p><input name="vless_encryption" value="{{ server.vless_encryption or '' }}" placeholder="VLESS client encryption">
+    <input name="vless_decryption" value="{{ server.vless_decryption or '' }}" placeholder="VLESS server decryption"></p>
+    <p><input name="reality_mldsa65_seed" value="{{ server.reality_mldsa65_seed or '' }}" placeholder="ML-DSA65 Seed">
+    <input name="reality_mldsa65_verify" value="{{ server.reality_mldsa65_verify or '' }}" placeholder="ML-DSA65 Verify">
+    <input name="reality_spider_x" value="{{ server.reality_spider_x or '/' }}" placeholder="SpiderX"></p>
   </div>
   <div data-transport-section="vision">
     <p><strong>Vision (резервный)</strong></p>

@@ -34,9 +34,23 @@ class NodeRegistration(BaseModel):
     reality_server_name: str = "www.microsoft.com"
     xhttp_path: str = "/"
     xhttp_mode: str = "auto"
+    vless_encryption: str
+    vless_decryption: str
+    reality_mldsa65_seed: str
+    reality_mldsa65_verify: str
+    reality_spider_x: str = "/"
     agent_token: str
 
-    @field_validator("public_host", "reality_public_key", "reality_server_name", "agent_token")
+    @field_validator(
+        "public_host",
+        "reality_public_key",
+        "reality_server_name",
+        "vless_encryption",
+        "vless_decryption",
+        "reality_mldsa65_seed",
+        "reality_mldsa65_verify",
+        "agent_token",
+    )
     @classmethod
     def require_nonempty(cls, value: str) -> str:
         value = value.strip()
@@ -139,24 +153,34 @@ if ! command -v openssl >/dev/null; then
 fi
 mkdir -p /opt/sumrak-node
 cd /opt/sumrak-node
-KEYS="$(docker run --rm ghcr.io/xtls/xray-core:latest x25519)"
+XRAY_IMAGE="ghcr.io/xtls/xray-core:26.6.1"
+docker pull "$XRAY_IMAGE"
+KEYS="$(docker run --rm "$XRAY_IMAGE" x25519)"
 PRIVATE_KEY="$(printf '%s\\n' "$KEYS" | awk -F': ' 'tolower($1) ~ /private/ {{print $2; exit}}')"
 PUBLIC_KEY="$(printf '%s\\n' "$KEYS" | awk -F': ' 'tolower($1) ~ /^(public key|password \\(publickey\\))$/ {{print $2; exit}}')"
 [[ -n "$PRIVATE_KEY" && -n "$PUBLIC_KEY" ]] || {{ echo "Could not parse REALITY private/public key" >&2; exit 1; }}
+VLESS_KEYS="$(docker run --rm "$XRAY_IMAGE" vlessenc)"
+VLESS_DECRYPTION="$(printf '%s\\n' "$VLESS_KEYS" | awk -F'"' '/"decryption"/ {{print $4; exit}}')"
+VLESS_ENCRYPTION="$(printf '%s\\n' "$VLESS_KEYS" | awk -F'"' '/"encryption"/ {{print $4; exit}}')"
+[[ -n "$VLESS_DECRYPTION" && -n "$VLESS_ENCRYPTION" ]] || {{ echo "Could not parse VLESS encryption keys" >&2; exit 1; }}
+MLDSA_KEYS="$(docker run --rm "$XRAY_IMAGE" mldsa65)"
+MLDSA_SEED="$(printf '%s\\n' "$MLDSA_KEYS" | awk -F': ' 'tolower($1) == "seed" {{print $2; exit}}')"
+MLDSA_VERIFY="$(printf '%s\\n' "$MLDSA_KEYS" | awk -F': ' 'tolower($1) == "verify" {{print $2; exit}}')"
+[[ -n "$MLDSA_SEED" && -n "$MLDSA_VERIFY" ]] || {{ echo "Could not parse ML-DSA65 keys" >&2; exit 1; }}
 SHORT_ID="$(openssl rand -hex 8)"
 AGENT_TOKEN="$(openssl rand -hex 32)"
 PUBLIC_HOST="${{PUBLIC_HOST:-$(curl -fsSL https://api.ipify.org)}}"
 [[ "$SHORT_ID" =~ ^[0-9a-f]{{16}}$ ]] || {{ echo "Invalid REALITY shortId" >&2; exit 1; }}
 [[ -n "$PUBLIC_HOST" ]] || {{ echo "Could not determine public host" >&2; exit 1; }}
 cat > config.json <<EOF
-{{"log":{{"loglevel":"warning"}},"inbounds":[{{"tag":"vless-reality","listen":"0.0.0.0","port":443,"protocol":"vless","settings":{{"clients":[],"decryption":"none"}},"streamSettings":{{"network":"xhttp","security":"reality","xhttpSettings":{{"path":"/","mode":"auto"}},"realitySettings":{{"show":false,"target":"www.microsoft.com:443","serverNames":["www.microsoft.com"],"privateKey":"$PRIVATE_KEY","shortIds":["$SHORT_ID"]}}}},"sniffing":{{"enabled":true,"destOverride":["http","tls","quic"]}}}}],"outbounds":[{{"tag":"direct","protocol":"freedom"}},{{"tag":"blocked","protocol":"blackhole"}}]}}
+{{"log":{{"loglevel":"warning"}},"inbounds":[{{"tag":"vless-reality","listen":"0.0.0.0","port":443,"protocol":"vless","settings":{{"clients":[],"decryption":"$VLESS_DECRYPTION"}},"streamSettings":{{"network":"xhttp","security":"reality","xhttpSettings":{{"host":"","path":"/","mode":"auto","xPaddingBytes":"100-1000","scMaxEachPostBytes":"1000000","scMaxBufferedPosts":30,"scStreamUpServerSecs":"20-80"}},"realitySettings":{{"show":false,"target":"web.max.ru:443","serverNames":["web.max.ru"],"privateKey":"$PRIVATE_KEY","shortIds":["$SHORT_ID"],"mldsa65Seed":"$MLDSA_SEED"}}}},"sniffing":{{"enabled":false,"destOverride":["http","tls","quic"]}}}}],"outbounds":[{{"tag":"direct","protocol":"freedom"}},{{"tag":"blocked","protocol":"blackhole"}}]}}
 EOF
 curl -fsSL "$PANEL_URL/node/agent.py" -o agent.py
 curl -fsSL "$PANEL_URL/node/Dockerfile.agent" -o Dockerfile.agent
 cat > compose.yaml <<EOF
 services:
   xray:
-    image: ghcr.io/xtls/xray-core:latest
+    image: ghcr.io/xtls/xray-core:26.6.1
     container_name: sumrak-node-xray
     restart: unless-stopped
     command: run -config /etc/xray/config.json
@@ -173,13 +197,14 @@ services:
       AGENT_TOKEN: "$AGENT_TOKEN"
       HOST_NODE_DIR: "/opt/sumrak-node"
       XRAY_CONTAINER_NAME: "sumrak-node-xray"
+      XRAY_IMAGE: "ghcr.io/xtls/xray-core:26.6.1"
     volumes:
       - ./:/data
       - /var/run/docker.sock:/var/run/docker.sock
 EOF
 docker compose build --no-cache agent
 docker compose up -d xray
-curl -fsSL -X POST "$PANEL_URL/api/node/register" -H 'Content-Type: application/json' -d "$(printf '{{"node_token":"%s","public_host":"%s","public_port":443,"reality_public_key":"%s","reality_short_id":"%s","reality_server_name":"www.microsoft.com","xhttp_path":"/","xhttp_mode":"auto","agent_token":"%s"}}' "$NODE_TOKEN" "$PUBLIC_HOST" "$PUBLIC_KEY" "$SHORT_ID" "$AGENT_TOKEN")"
+curl -fsSL -X POST "$PANEL_URL/api/node/register" -H 'Content-Type: application/json' -d "$(printf '{{"node_token":"%s","public_host":"%s","public_port":443,"reality_public_key":"%s","reality_short_id":"%s","reality_server_name":"web.max.ru","xhttp_path":"/","xhttp_mode":"auto","vless_encryption":"%s","vless_decryption":"%s","reality_mldsa65_seed":"%s","reality_mldsa65_verify":"%s","reality_spider_x":"/","agent_token":"%s"}}' "$NODE_TOKEN" "$PUBLIC_HOST" "$PUBLIC_KEY" "$SHORT_ID" "$VLESS_ENCRYPTION" "$VLESS_DECRYPTION" "$MLDSA_SEED" "$MLDSA_VERIFY" "$AGENT_TOKEN")"
 docker compose up -d agent
 docker exec sumrak-node-agent docker version
 docker exec sumrak-node-agent docker restart sumrak-node-xray
@@ -232,10 +257,16 @@ async def register_node(
         reality_server_name=payload.reality_server_name,
         reality_public_key=payload.reality_public_key,
         reality_short_id=payload.reality_short_id,
-        fingerprint="chrome",
+        fingerprint="firefox",
         flow="",
         xhttp_path=payload.xhttp_path,
         xhttp_mode=payload.xhttp_mode,
+        pq_enabled=True,
+        vless_encryption=payload.vless_encryption,
+        vless_decryption=payload.vless_decryption,
+        reality_mldsa65_seed=payload.reality_mldsa65_seed,
+        reality_mldsa65_verify=payload.reality_mldsa65_verify,
+        reality_spider_x=payload.reality_spider_x,
         management_mode="agent",
         agent_token=payload.agent_token,
         agent_last_seen_at=current,
@@ -281,6 +312,9 @@ async def sync_node(
         "reality_short_id": server.reality_short_id,
         "xhttp_path": server.xhttp_path,
         "xhttp_mode": server.xhttp_mode,
+        "pq_enabled": server.pq_enabled,
+        "vless_decryption": server.vless_decryption,
+        "reality_mldsa65_seed": server.reality_mldsa65_seed,
         "clients": clients,
     }
 
