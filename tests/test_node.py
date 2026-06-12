@@ -12,6 +12,7 @@ from app.config import Settings, get_settings
 from app.db import get_session
 from app.main import app
 from app.models import Base, Device, DeviceServerProfile, NodeEnrollment, User, VpnServer
+from app.node import reconcile_agent_server
 from app.nodes import AgentNodeManager
 
 
@@ -237,6 +238,40 @@ async def test_agent_health_uses_last_seen_and_error():
     server.agent_last_error = None
     server.agent_last_seen_at = datetime.now(UTC) - timedelta(minutes=3)
     assert await manager.health_check(server) == "offline"
+
+
+async def test_reconcile_agent_server_replaces_hostname_alias(monkeypatch):
+    engine, sessions = await database()
+    async with sessions() as session:
+        old = VpnServer(
+            name="France old",
+            public_host="franc.sumrak.digital",
+            reality_server_name="web.max.ru",
+            reality_public_key="old-key",
+            reality_short_id="0123456789abcdef",
+            management_mode="agent",
+            is_active=True,
+        )
+        new = VpnServer(
+            name="France new",
+            public_host="31.56.146.138",
+            reality_server_name="web.max.ru",
+            reality_public_key="new-key",
+            reality_short_id="fedcba9876543210",
+            management_mode="agent",
+            is_active=True,
+        )
+        session.add_all([old, new])
+        await session.flush()
+
+        async def resolve(host):
+            return {host, "31.56.146.138"}
+
+        monkeypatch.setattr("app.node.resolve_host_addresses", resolve)
+        await reconcile_agent_server(session, new)
+        assert old.is_active is False
+        assert new.is_active is True
+    await engine.dispose()
 
 
 def test_agent_renders_xhttp_and_vision_candidates(tmp_path, monkeypatch):

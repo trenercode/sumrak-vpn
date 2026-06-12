@@ -1,4 +1,6 @@
+import asyncio
 import secrets
+import socket
 import uuid
 from datetime import UTC, datetime
 from pathlib import Path
@@ -87,18 +89,19 @@ async def authenticated_agent(
 
 
 async def reconcile_agent_server(session: AsyncSession, server: VpnServer) -> int:
-    replaced = list(
+    active_agents = list(
         await session.scalars(
             select(VpnServer).where(
                 VpnServer.id != server.id,
                 VpnServer.management_mode.in_(["agent", "agent_future"]),
-                VpnServer.public_host == server.public_host,
                 VpnServer.is_active.is_(True),
             )
         )
     )
-    for item in replaced:
-        item.is_active = False
+    server_addresses = await resolve_host_addresses(server.public_host)
+    for item in active_agents:
+        if server_addresses.intersection(await resolve_host_addresses(item.public_host)):
+            item.is_active = False
 
     existing_device_ids = set(
         await session.scalars(
@@ -131,6 +134,18 @@ async def reconcile_agent_server(session: AsyncSession, server: VpnServer) -> in
         created += 1
     await session.flush()
     return created
+
+
+async def resolve_host_addresses(host: str) -> set[str]:
+    addresses = {host.strip().lower()}
+    try:
+        results = await asyncio.get_running_loop().run_in_executor(
+            None, socket.getaddrinfo, host, None
+        )
+    except OSError:
+        return addresses
+    addresses.update(result[4][0].lower() for result in results)
+    return addresses
 
 
 @router.get("/node/install.sh", response_class=PlainTextResponse)
