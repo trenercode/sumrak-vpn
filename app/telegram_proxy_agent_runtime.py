@@ -9,7 +9,7 @@ from pathlib import Path
 PANEL_URL = os.environ.get("PANEL_URL", "http://127.0.0.1:8000").rstrip("/")
 AGENT_TOKEN = os.environ.get("AGENT_TOKEN", "")
 DATA_DIR = Path("/data")
-VERSION = "1.0.0"
+VERSION = "1.0.1"
 
 
 def api(path, method="GET", payload=None):
@@ -56,21 +56,29 @@ def render_compose(config):
 """
 
 
+def run_command(args, check=True):
+    result = subprocess.run(args, capture_output=True, text=True)
+    if check and result.returncode != 0:
+        output = "\n".join(part.strip() for part in [result.stdout, result.stderr] if part.strip())
+        raise RuntimeError(f"{' '.join(args)} failed ({result.returncode}): {output}")
+    return result
+
+
 def sync():
     config = api("/api/telegram-proxy/sync", "POST")
     compose = render_compose(config)
     digest = hashlib.sha256(compose.encode()).hexdigest()
     current = DATA_DIR / "compose.yaml"
     if not config["enabled"]:
-        subprocess.run(["docker", "stop", "sumrak-telegram-proxy"], check=False)
+        run_command(["docker", "stop", "sumrak-telegram-proxy"], check=False)
         return digest
     if not current.exists() or current.read_text() != compose:
         candidate = DATA_DIR / "compose.candidate.yaml"
         candidate.write_text(compose)
-        subprocess.run(["docker", "compose", "-f", str(candidate), "config"], check=True)
+        run_command(["docker", "compose", "-f", str(candidate), "config"])
         current.write_text(compose)
         candidate.unlink(missing_ok=True)
-        subprocess.run(["docker", "compose", "-f", str(current), "up", "-d", "proxy"], check=True)
+        run_command(["docker", "compose", "-f", str(current), "up", "-d", "proxy"])
     return digest
 
 

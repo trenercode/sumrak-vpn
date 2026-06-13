@@ -18,7 +18,7 @@ from app.telegram_proxy import (
     proxy_link,
     token_hash,
 )
-from app.telegram_proxy_agent_runtime import render_compose
+from app.telegram_proxy_agent_runtime import render_compose, run_command
 
 
 async def database():
@@ -109,6 +109,10 @@ def test_proxy_register_heartbeat_and_one_time_token():
             assert 'INSTALL_DIR="/opt/sumrak-telegram-proxy"' in install.text
             assert "TCP port 443 is already occupied" in install.text
             assert "nineseconds/mtg:1" in install.text
+            assert "agent docker compose version" in install.text
+            dockerfile = client.get("/telegram-proxy/Dockerfile.agent")
+            assert dockerfile.status_code == 200
+            assert "/usr/local/libexec/docker/cli-plugins/docker-compose" in dockerfile.text
             payload = {
                 "install_token": raw,
                 "public_host": "proxy.example.com",
@@ -163,3 +167,17 @@ def test_sponsor_tag_enters_proxy_command_and_bot_has_button():
     assert 'command: ["run","ee-secret","0123456789abcdef"]' in compose
     labels = [button.text for row in main_keyboard().inline_keyboard for button in row]
     assert "🔗 Прокси Telegram" in labels
+
+
+def test_agent_command_error_includes_stderr(monkeypatch):
+    class Result:
+        returncode = 125
+        stdout = ""
+        stderr = "docker: 'compose' is not a docker command"
+
+    monkeypatch.setattr("app.telegram_proxy_agent_runtime.subprocess.run", lambda *args, **kwargs: Result())
+    try:
+        run_command(["docker", "compose", "config"])
+        raise AssertionError("run_command should fail")
+    except RuntimeError as exc:
+        assert "docker: 'compose' is not a docker command" in str(exc)
