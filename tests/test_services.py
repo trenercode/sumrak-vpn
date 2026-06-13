@@ -65,6 +65,29 @@ async def test_device_creation_and_removal_preserves_vpn_contract():
     await engine.dispose()
 
 
+async def test_user_cannot_create_device_above_limit():
+    engine, sessions = await database()
+    settings = Settings(
+        max_devices=10,
+        xray_public_host="vpn.example.com",
+        xray_reality_public_key="key",
+        xray_reality_short_id="0123456789abcdef",
+    )
+    nodes = NodeManagerRegistry(settings)
+    async with sessions() as session:
+        user = await get_or_create_user(session, 30, "limited_user", "Limited User")
+        for _ in range(10):
+            await create_device(session, user, "ios", settings, nodes)
+
+        try:
+            await create_device(session, user, "ios", settings, nodes)
+        except ValueError as error:
+            assert str(error) == "device_limit"
+        else:
+            raise AssertionError("11th active device must be rejected")
+    await engine.dispose()
+
+
 async def test_notification_is_not_returned_after_logging():
     engine, sessions = await database()
     async with sessions() as session:

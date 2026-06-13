@@ -152,6 +152,54 @@ class NodeEnrollment(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
+class TelegramProxyNode(Base):
+    __tablename__ = "telegram_proxy_nodes"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    name: Mapped[str] = mapped_column(String(100))
+    country_code: Mapped[str] = mapped_column(String(8), default="")
+    public_host: Mapped[str] = mapped_column(String(255), default="")
+    public_port: Mapped[int] = mapped_column(Integer, default=443)
+    secret: Mapped[str | None] = mapped_column(Text)
+    sponsor_tag: Mapped[str | None] = mapped_column(Text)
+    sponsor_channel: Mapped[str | None] = mapped_column(String(255))
+    priority: Mapped[int] = mapped_column(Integer, default=100)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
+    status: Mapped[str] = mapped_column(String(20), default="pending", index=True)
+    health_error: Mapped[str | None] = mapped_column(Text)
+    last_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_sync_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    version: Mapped[str | None] = mapped_column(String(64))
+    active_connections: Mapped[int | None] = mapped_column(Integer)
+    traffic_bytes: Mapped[int | None] = mapped_column(BigInteger)
+    current_config_hash: Mapped[str | None] = mapped_column(String(64))
+    install_token_hash: Mapped[str | None] = mapped_column(String(64), unique=True, index=True)
+    install_token_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    agent_token_hash: Mapped[str | None] = mapped_column(String(64), unique=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, onupdate=utcnow
+    )
+
+    events: Mapped[list["TelegramProxyEvent"]] = relationship(
+        back_populates="node", cascade="all, delete-orphan"
+    )
+
+
+class TelegramProxyEvent(Base):
+    __tablename__ = "telegram_proxy_events"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    node_id: Mapped[str] = mapped_column(
+        ForeignKey("telegram_proxy_nodes.id", ondelete="CASCADE"), index=True
+    )
+    event_type: Mapped[str] = mapped_column(String(32), index=True)
+    message: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+    node: Mapped[TelegramProxyNode] = relationship(back_populates="events")
+
+
 class DeviceServerProfile(Base):
     __tablename__ = "device_server_profiles"
     __table_args__ = (UniqueConstraint("device_id", "server_id", name="uq_device_server_profile"),)

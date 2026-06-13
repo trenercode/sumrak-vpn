@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+{% block title %}{{ node.name }}{% endblock %}
+{% block content %}
+<h1>{{ node.name }}</h1>
+<p>{{ node.country_code }} · {{ node.public_host or "не зарегистрирована" }}:{{ node.public_port }}</p>
+<p>Health: <strong>{{ "online" if online else ("offline" if node.enabled else node.status) }}</strong></p>
+<p>Версия: {{ node.version or "—" }} · Последний heartbeat: {{ node.last_seen_at or "—" }}</p>
+<p>Подключения: {{ node.active_connections if node.active_connections is not none else "—" }} · Трафик: {{ node.traffic_bytes if node.traffic_bytes is not none else "—" }}</p>
+<p>Secret: <code>{{ secret_masked }}</code></p>
+{% if node.health_error %}<p class="muted">Ошибка: {{ node.health_error }}</p>{% endif %}
+
+<section class="card">
+  <h2>Настройки</h2>
+  <form method="post" action="/admin/telegram-proxies/{{ node.id }}">
+    <input name="name" value="{{ node.name }}" required>
+    <input name="country_code" value="{{ node.country_code }}" placeholder="Страна">
+    <input name="priority" type="number" value="{{ node.priority }}">
+    <input name="sponsor_channel" value="{{ node.sponsor_channel or '' }}" placeholder="@канал">
+    <input name="sponsor_tag" value="{{ node.sponsor_tag or '' }}" placeholder="Sponsor tag от @MTProxybot">
+    <button type="submit">Сохранить</button>
+  </form>
+  <p class="muted">Чтобы включить спонсорский канал, зарегистрируйте прокси через @MTProxybot и вставьте выданный adtag. Агент применит его автоматически.</p>
+</section>
+
+<p class="inline">
+  <form method="post" action="/admin/telegram-proxies/{{ node.id }}/toggle"><button>{{ "Выключить" if node.enabled else "Включить" }}</button></form>
+  <form method="post" action="/admin/telegram-proxies/{{ node.id }}/install"><button>Новая команда установки</button></form>
+  <form method="post" action="/admin/telegram-proxies/{{ node.id }}/delete"><button class="danger">Удалить</button></form>
+</p>
+
+<h2>События</h2>
+<table>
+  <thead><tr><th>Дата</th><th>Тип</th><th>Сообщение</th></tr></thead>
+  <tbody>
+  {% for event in node.events|sort(attribute='created_at', reverse=true) %}
+    <tr><td>{{ event.created_at }}</td><td>{{ event.event_type }}</td><td>{{ event.message }}</td></tr>
+  {% else %}<tr><td colspan="3">Событий пока нет.</td></tr>{% endfor %}
+  </tbody>
+</table>
+{% endblock %}

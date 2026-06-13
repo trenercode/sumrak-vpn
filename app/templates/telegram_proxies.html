@@ -1,0 +1,34 @@
+{% extends "base.html" %}
+{% block title %}Telegram Proxy{% endblock %}
+{% block content %}
+<h1>Telegram MTProto Proxy</h1>
+<p class="muted">Независимые FakeTLS-прокси для Telegram. Они не используют Xray и VPN-ноды.</p>
+<section class="card">
+  <h2>Подключить новую ноду</h2>
+  <form method="post" action="/admin/telegram-proxies">
+    <input name="name" placeholder="Название" required>
+    <input name="country_code" placeholder="Страна, например FR">
+    <input name="priority" type="number" value="100" placeholder="Приоритет">
+    <input name="public_port" type="number" value="443" placeholder="Порт">
+    <button type="submit">Создать ссылку установки</button>
+  </form>
+</section>
+<h2>Ноды</h2>
+<table>
+  <thead><tr><th>Нода</th><th>Адрес</th><th>Приоритет</th><th>Health</th><th>Статус</th><th>Secret</th></tr></thead>
+  <tbody>
+  {% for node in nodes %}
+    <tr>
+      <td><a href="/admin/telegram-proxies/{{ node.id }}">{{ node.name }}</a></td>
+      <td>{{ node.public_host or "не зарегистрирована" }}:{{ node.public_port }}</td>
+      <td>{{ node.priority }}</td>
+      <td>{{ "online" if is_online(node) else ("offline" if node.enabled else node.status) }}</td>
+      <td>{{ "активен" if node.enabled else "выключен" }}</td>
+      <td>{{ mask_secret(node.secret) }}</td>
+    </tr>
+  {% else %}
+    <tr><td colspan="6">Прокси-ноды пока не добавлены.</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% endblock %}

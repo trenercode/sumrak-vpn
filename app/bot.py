@@ -34,6 +34,7 @@ from app.services import (
     revoke_device,
     subscription_status,
 )
+from app.telegram_proxy import best_proxy, proxy_link
 
 settings = get_settings()
 nodes = NodeManagerRegistry(settings)
@@ -74,9 +75,30 @@ def main_keyboard():
     keyboard.button(text="💳 Подписка", callback_data="subscription:status")
     keyboard.button(text="🎁 Реферальная программа", callback_data="referral:menu")
     keyboard.button(text="📲 Как подключить", callback_data="help:platforms")
+    keyboard.button(text="🔗 Прокси Telegram", callback_data="telegram-proxy")
     add_support_button(keyboard)
     keyboard.adjust(1)
     return keyboard.as_markup()
+
+
+@router.callback_query(F.data == "telegram-proxy")
+async def telegram_proxy(callback: CallbackQuery):
+    async with SessionLocal() as session:
+        node = await best_proxy(session)
+    keyboard = InlineKeyboardBuilder()
+    if node:
+        keyboard.button(text="Подключить прокси", url=proxy_link(node))
+        text = (
+            "🔗 Прокси Telegram\n\n"
+            "Нажмите кнопку ниже, чтобы добавить защищённый MTProto Proxy в Telegram."
+        )
+    else:
+        text = "Прокси временно недоступен."
+    add_support_button(keyboard)
+    keyboard.button(text="⬅️ Назад", callback_data="menu")
+    keyboard.adjust(1)
+    await callback.answer()
+    await callback.message.answer(text, reply_markup=keyboard.as_markup())
 
 
 def support_keyboard():

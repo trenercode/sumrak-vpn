@@ -16,6 +16,7 @@ from app.models import Base, Device
 from app.nodes import NodeManagerRegistry, ensure_default_server
 from app.node import router as node_router
 from app.services import subscription_uris
+from app.telegram_proxy import router as telegram_proxy_router
 from app.webapp import router as webapp_router
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -40,6 +41,7 @@ app.mount("/static", StaticFiles(directory=BASE_DIR / "static"), name="static")
 app.include_router(admin_router)
 app.include_router(webapp_router)
 app.include_router(node_router)
+app.include_router(telegram_proxy_router)
 
 
 @app.get("/health")

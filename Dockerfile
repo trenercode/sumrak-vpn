@@ -11,6 +11,7 @@ WORKDIR /app
 COPY pyproject.toml .
 COPY app app
 COPY deploy/node deploy/node
+COPY deploy/telegram-proxy deploy/telegram-proxy
 COPY alembic.ini .
 COPY alembic alembic
 RUN pip install --no-cache-dir .

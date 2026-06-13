@@ -488,6 +488,49 @@ docker run --rm \
 4. Xray config проходит `run -test`;
 5. Xray-логи содержат `accepted ... [vless-reality >> direct]`.
 
+## Telegram MTProto Proxy
+
+Telegram Proxy — отдельный FakeTLS MTProto-прокси только для Telegram. Это не VPN: он не
+маршрутизирует браузер, приложения и другой трафик устройства. Proxy-ноды всегда ставятся на
+отдельные VPS и не смешиваются с Xray/VPN-нодательной инфраструктурой.
+
+Создание:
+
+1. Откройте `/admin/telegram-proxies`.
+2. Нажмите «Создать ссылку установки».
+3. В течение 30 минут запустите показанную одноразовую команду от `root` на чистом
+   Ubuntu/Debian VPS.
+4. Установщик проверит свободный TCP-порт 443 и создаст только
+   `/opt/sumrak-telegram-proxy`.
+5. После регистрации нода появится `online`, а бот начнёт выдавать её через кнопку
+   «🔗 Прокси Telegram».
+
+Установщик не изменяет SSH, Xray, VPN-ноды или другие каталоги. Install token хранится в БД
+только как hash, действует 30 минут и после успешной регистрации повторно не используется.
+
+Sponsor banner настраивается вручную: передайте secret зарегистрированной ноды официальному
+`@MTProxybot`, получите promotion/ad tag и вставьте его в поле `Sponsor tag` в админке.
+Агент применит tag при следующей синхронизации. Автоматическое получение tag официально не
+предоставляется; баннер может появиться не сразу и зависит от клиента Telegram и статистики.
+
+Проверка и диагностика proxy-ноды:
+
+```bash
+ss -lntp | grep ':443 '
+cd /opt/sumrak-telegram-proxy
+docker compose ps
+docker logs --tail 200 sumrak-telegram-proxy-agent
+docker logs --tail 200 sumrak-telegram-proxy
+```
+
+Для удаления сначала выключите ноду в `/admin/telegram-proxies`, затем удалите запись. Это не
+останавливает VPS автоматически; при необходимости отдельно выполните на proxy-ноду:
+
+```bash
+cd /opt/sumrak-telegram-proxy
+docker compose down
+```
+
 ## Тесты
 
 Установите dev-зависимости:

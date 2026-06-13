@@ -1,0 +1,9 @@
+{% extends "base.html" %}
+{% block title %}Установка Telegram Proxy{% endblock %}
+{% block content %}
+<h1>Установка {{ node.name }}</h1>
+<p>Команда одноразовая и действует 30 минут. Запустите её от root на отдельном Ubuntu/Debian VPS.</p>
+<textarea readonly style="width:100%;min-height:90px">{{ command }}</textarea>
+<p class="muted">Установщик использует только /opt/sumrak-telegram-proxy и остановится, если TCP-порт 443 занят.</p>
+<p><a href="/admin/telegram-proxies/{{ node.id }}">Открыть ноду</a></p>
+{% endblock %}
