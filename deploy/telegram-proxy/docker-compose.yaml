@@ -8,6 +8,7 @@ services:
     command: ["run", "REPLACE_WITH_FAKETLS_SECRET"]
     environment:
       MTG_BIND: 0.0.0.0:3128
+      MTG_IPV4: "REPLACE_WITH_PUBLIC_IP:443"
       MTG_STATS_BIND: 0.0.0.0:3129
     ports:
       - "443:3128"

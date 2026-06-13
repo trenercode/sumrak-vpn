@@ -160,11 +160,13 @@ def test_sponsor_tag_enters_proxy_command_and_bot_has_button():
         {
             "secret": "ee-secret",
             "sponsor_tag": "0123456789abcdef",
+            "public_host": "151.243.3.15",
             "public_port": 443,
             "enabled": True,
         }
     )
     assert compose.startswith("name: sumrak-telegram-proxy")
+    assert 'MTG_IPV4: "151.243.3.15:443"' in compose
     assert 'command: ["run","ee-secret","0123456789abcdef"]' in compose
     labels = [button.text for row in main_keyboard().inline_keyboard for button in row]
     assert "🔗 Прокси Telegram" in labels

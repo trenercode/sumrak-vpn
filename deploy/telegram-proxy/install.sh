@@ -45,6 +45,7 @@ services:
     command: ["run", "$SECRET"]
     environment:
       MTG_BIND: 0.0.0.0:3128
+      MTG_IPV4: "$PUBLIC_HOST:443"
       MTG_STATS_BIND: 0.0.0.0:3129
     ports:
       - "443:3128"

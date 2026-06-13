@@ -184,6 +184,7 @@ async def proxy_sync(
         "enabled": node.enabled,
         "secret": node.secret,
         "sponsor_tag": node.sponsor_tag or "",
+        "public_host": node.public_host,
         "public_port": node.public_port,
     }
 

@@ -9,7 +9,7 @@ from pathlib import Path
 PANEL_URL = os.environ.get("PANEL_URL", "http://127.0.0.1:8000").rstrip("/")
 AGENT_TOKEN = os.environ.get("AGENT_TOKEN", "")
 DATA_DIR = Path("/data")
-VERSION = "1.0.2"
+VERSION = "1.0.3"
 
 
 def api(path, method="GET", payload=None):
@@ -40,6 +40,7 @@ services:
     command: {command}
     environment:
       MTG_BIND: 0.0.0.0:3128
+      MTG_IPV4: "{config['public_host']}:{config['public_port']}"
       MTG_STATS_BIND: 0.0.0.0:3129
     ports:
       - "{config['public_port']}:3128"
