@@ -35,6 +35,8 @@ PUBLIC_HOST="${PUBLIC_HOST:-$(curl -fsSL https://api.ipify.org)}"
 curl -fsSL "$PANEL_URL/telegram-proxy/agent.py" -o agent.py
 curl -fsSL "$PANEL_URL/telegram-proxy/Dockerfile.agent" -o Dockerfile.agent
 cat > compose.yaml <<EOF
+name: sumrak-telegram-proxy
+
 services:
   proxy:
     image: $PROXY_IMAGE

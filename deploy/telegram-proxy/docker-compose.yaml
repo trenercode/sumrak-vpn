@@ -1,3 +1,5 @@
+name: sumrak-telegram-proxy
+
 services:
   proxy:
     image: nineseconds/mtg:1

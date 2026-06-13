@@ -9,7 +9,7 @@ from pathlib import Path
 PANEL_URL = os.environ.get("PANEL_URL", "http://127.0.0.1:8000").rstrip("/")
 AGENT_TOKEN = os.environ.get("AGENT_TOKEN", "")
 DATA_DIR = Path("/data")
-VERSION = "1.0.1"
+VERSION = "1.0.2"
 
 
 def api(path, method="GET", payload=None):
@@ -30,7 +30,9 @@ def api(path, method="GET", payload=None):
 def render_compose(config):
     tag = config.get("sponsor_tag", "")
     command = json.dumps(["run", config["secret"]] + ([tag] if tag else []), separators=(",", ":"))
-    return f"""services:
+    return f"""name: sumrak-telegram-proxy
+
+services:
   proxy:
     image: nineseconds/mtg:1
     container_name: sumrak-telegram-proxy

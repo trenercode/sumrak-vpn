@@ -164,6 +164,7 @@ def test_sponsor_tag_enters_proxy_command_and_bot_has_button():
             "enabled": True,
         }
     )
+    assert compose.startswith("name: sumrak-telegram-proxy")
     assert 'command: ["run","ee-secret","0123456789abcdef"]' in compose
     labels = [button.text for row in main_keyboard().inline_keyboard for button in row]
     assert "🔗 Прокси Telegram" in labels
