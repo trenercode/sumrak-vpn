@@ -60,7 +60,7 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
 EOF
 docker compose build --no-cache agent
-docker compose run --rm --no-deps agent docker compose version
+docker compose run --rm --no-deps -T agent docker compose version </dev/null
 docker compose up -d proxy
 curl -fsSL -X POST "$PANEL_URL/api/telegram-proxy/register" \
   -H 'Content-Type: application/json' \

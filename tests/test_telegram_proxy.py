@@ -109,7 +109,7 @@ def test_proxy_register_heartbeat_and_one_time_token():
             assert 'INSTALL_DIR="/opt/sumrak-telegram-proxy"' in install.text
             assert "TCP port 443 is already occupied" in install.text
             assert "nineseconds/mtg:1" in install.text
-            assert "agent docker compose version" in install.text
+            assert "agent docker compose version </dev/null" in install.text
             dockerfile = client.get("/telegram-proxy/Dockerfile.agent")
             assert dockerfile.status_code == 200
             assert "/usr/local/libexec/docker/cli-plugins/docker-compose" in dockerfile.text
