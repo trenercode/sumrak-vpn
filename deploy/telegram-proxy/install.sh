@@ -4,7 +4,8 @@ set -euo pipefail
 INSTALL_TOKEN="${1:-}"
 PANEL_URL="__PANEL_URL__"
 INSTALL_DIR="/opt/sumrak-telegram-proxy"
-PROXY_IMAGE="telegrammessenger/proxy:latest"
+PROXY_IMAGE="nineseconds/mtg:2"
+FAKETLS_DOMAIN="ya.ru"
 
 [[ "$(id -u)" == "0" ]] || { echo "Run as root" >&2; exit 1; }
 [[ -n "$INSTALL_TOKEN" ]] || { echo "INSTALL_TOKEN is required" >&2; exit 1; }
@@ -23,12 +24,20 @@ if ! command -v docker >/dev/null; then
   curl -fsSL https://get.docker.com | sh
 fi
 docker compose version >/dev/null 2>&1 || apt-get install -y docker-compose-plugin
+cat > /etc/sysctl.d/99-sumrak-telegram-proxy.conf <<EOF
+net.netfilter.nf_conntrack_max=262144
+net.netfilter.nf_conntrack_tcp_timeout_established=3600
+net.netfilter.nf_conntrack_tcp_timeout_time_wait=30
+net.core.somaxconn=65535
+EOF
+sysctl --system >/dev/null
 
 mkdir -p "$INSTALL_DIR"
 cd "$INSTALL_DIR"
 docker pull "$PROXY_IMAGE"
-SECRET="$(openssl rand -hex 16)"
-[[ "$SECRET" =~ ^[0-9a-f]{32}$ ]] || { echo "Could not generate MTProto secret" >&2; exit 1; }
+FAKETLS_DOMAIN_HEX="$(printf '%s' "$FAKETLS_DOMAIN" | od -An -tx1 | tr -d ' \n')"
+SECRET="ee$(openssl rand -hex 16)$FAKETLS_DOMAIN_HEX"
+[[ "$SECRET" =~ ^ee[0-9a-f]+$ ]] || { echo "Could not generate FakeTLS secret" >&2; exit 1; }
 AGENT_TOKEN="$(openssl rand -hex 32)"
 PUBLIC_HOST="${PUBLIC_HOST:-$(curl -fsSL https://api.ipify.org)}"
 
@@ -42,10 +51,8 @@ services:
     image: $PROXY_IMAGE
     container_name: sumrak-telegram-proxy
     restart: unless-stopped
-    environment:
-      SECRET: "$SECRET"
-    ports:
-      - "443:443"
+    network_mode: host
+    command: ["simple-run", "0.0.0.0:443", "$SECRET"]
   agent:
     build:
       context: .
@@ -64,6 +71,6 @@ docker compose run --rm --no-deps -T agent docker compose version </dev/null
 docker compose up -d proxy
 curl -fsSL -X POST "$PANEL_URL/api/telegram-proxy/register" \
   -H 'Content-Type: application/json' \
-  -d "$(printf '{"install_token":"%s","public_host":"%s","public_port":443,"secret":"dd%s","agent_token":"%s","version":"1.2.0"}' "$INSTALL_TOKEN" "$PUBLIC_HOST" "$SECRET" "$AGENT_TOKEN")"
+  -d "$(printf '{"install_token":"%s","public_host":"%s","public_port":443,"secret":"%s","agent_token":"%s","version":"1.4.0"}' "$INSTALL_TOKEN" "$PUBLIC_HOST" "$SECRET" "$AGENT_TOKEN")"
 docker compose up -d agent
 echo "Sumrak Telegram Proxy installed: $PUBLIC_HOST:443"

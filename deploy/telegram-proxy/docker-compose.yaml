@@ -2,10 +2,8 @@ name: sumrak-telegram-proxy
 
 services:
   proxy:
-    image: telegrammessenger/proxy:latest
+    image: nineseconds/mtg:2
     container_name: sumrak-telegram-proxy
     restart: unless-stopped
-    environment:
-      SECRET: "REPLACE_WITH_32_HEX_SECRET_WITHOUT_DD"
-    ports:
-      - "443:443"
+    network_mode: host
+    command: ["simple-run", "0.0.0.0:443", "REPLACE_WITH_EE_FAKETLS_SECRET"]

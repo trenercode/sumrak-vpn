@@ -108,9 +108,12 @@ def test_proxy_register_heartbeat_and_one_time_token():
             assert 'PANEL_URL="https://panel.example.com"' in install.text
             assert 'INSTALL_DIR="/opt/sumrak-telegram-proxy"' in install.text
             assert "TCP port 443 is already occupied" in install.text
-            assert "telegrammessenger/proxy:latest" in install.text
-            assert 'SECRET="$(openssl rand -hex 16)"' in install.text
-            assert '"secret":"dd%s"' in install.text
+            assert "nineseconds/mtg:2" in install.text
+            assert 'FAKETLS_DOMAIN="ya.ru"' in install.text
+            assert 'SECRET="ee$(openssl rand -hex 16)$FAKETLS_DOMAIN_HEX"' in install.text
+            assert '"secret":"%s"' in install.text
+            assert "net.netfilter.nf_conntrack_max=262144" in install.text
+            assert "network_mode: host" in install.text
             assert "agent docker compose version </dev/null" in install.text
             dockerfile = client.get("/telegram-proxy/Dockerfile.agent")
             assert dockerfile.status_code == 200
@@ -157,10 +160,10 @@ def test_proxy_register_heartbeat_and_one_time_token():
     asyncio.run(scenario())
 
 
-def test_official_mtproxy_config_and_bot_has_button():
+def test_mtg_faketls_config_and_bot_has_button():
     compose = render_compose(
         {
-            "secret": "dd0123456789abcdef0123456789abcdef",
+            "secret": "ee0123456789abcdef0123456789abcdef79612e7275",
             "sponsor_tag": "0123456789abcdef",
             "public_host": "151.243.3.15",
             "public_port": 443,
@@ -168,12 +171,25 @@ def test_official_mtproxy_config_and_bot_has_button():
         }
     )
     assert compose.startswith("name: sumrak-telegram-proxy")
-    assert "image: telegrammessenger/proxy:latest" in compose
-    assert 'SECRET: "0123456789abcdef0123456789abcdef"' in compose
-    assert 'TAG: "0123456789abcdef"' in compose
-    assert '- "443:443"' in compose
+    assert "image: nineseconds/mtg:2" in compose
+    assert (
+        'command: ["simple-run", "0.0.0.0:443", '
+        '"ee0123456789abcdef0123456789abcdef79612e7275"]'
+    ) in compose
+    assert "TAG:" not in compose
+    assert "network_mode: host" in compose
+    assert "ports:" not in compose
+    assert "\nservices:\n  proxy:\n" in compose
     labels = [button.text for row in main_keyboard().inline_keyboard for button in row]
     assert "🔗 Прокси Telegram" in labels
+
+
+def test_mtg_rejects_legacy_secret():
+    try:
+        render_compose({"secret": "dd0123456789abcdef0123456789abcdef"})
+        raise AssertionError("render_compose should reject legacy secrets")
+    except ValueError as exc:
+        assert "ee FakeTLS secret" in str(exc)
 
 
 def test_agent_command_error_includes_stderr(monkeypatch):

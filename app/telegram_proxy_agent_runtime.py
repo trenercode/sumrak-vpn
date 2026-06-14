@@ -9,7 +9,7 @@ from pathlib import Path
 PANEL_URL = os.environ.get("PANEL_URL", "http://127.0.0.1:8000").rstrip("/")
 AGENT_TOKEN = os.environ.get("AGENT_TOKEN", "")
 DATA_DIR = Path("/data")
-VERSION = "1.2.0"
+VERSION = "1.4.0"
 
 
 def api(path, method="GET", payload=None):
@@ -28,24 +28,18 @@ def api(path, method="GET", payload=None):
 
 
 def render_compose(config):
-    secret = config["secret"].removeprefix("dd")
-    environment = [f"SECRET={secret}"]
-    if config.get("sponsor_tag"):
-        environment.append(f"TAG={config['sponsor_tag']}")
-    environment_yaml = "\n".join(
-        f'      {item.split("=", 1)[0]}: "{item.split("=", 1)[1]}"' for item in environment
-    )
+    secret = config["secret"]
+    if not secret.startswith("ee"):
+        raise ValueError("mtg v2 requires an ee FakeTLS secret")
     return f"""name: sumrak-telegram-proxy
 
 services:
   proxy:
-    image: telegrammessenger/proxy:latest
+    image: nineseconds/mtg:2
     container_name: sumrak-telegram-proxy
     restart: unless-stopped
-    environment:
-{environment_yaml}
-    ports:
-      - "{config['public_port']}:443"
+    network_mode: host
+    command: ["simple-run", "0.0.0.0:443", "{secret}"]
   agent:
     build:
       context: .
