@@ -140,7 +140,9 @@ async def register_proxy(payload: ProxyRegistration, session: AsyncSession = Dep
         raise HTTPException(409, "Install token is invalid or expired")
     node.public_host = payload.public_host.strip()
     node.public_port = payload.public_port
-    node.secret = payload.secret.strip()
+    registered_secret = payload.secret.strip()
+    if not (node.secret or "").startswith("ee"):
+        node.secret = registered_secret
     node.agent_token_hash = token_hash(payload.agent_token)
     node.install_token_hash = None
     node.install_token_expires_at = None
@@ -151,7 +153,7 @@ async def register_proxy(payload: ProxyRegistration, session: AsyncSession = Dep
     node.health_error = None
     add_event(session, node, "registered", f"{node.public_host}:{node.public_port}")
     await session.commit()
-    return {"node_id": node.id, "status": "registered"}
+    return {"node_id": node.id, "status": "registered", "secret": node.secret}
 
 
 @router.post("/api/telegram-proxy/heartbeat")

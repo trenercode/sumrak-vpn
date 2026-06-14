@@ -160,6 +160,44 @@ def test_proxy_register_heartbeat_and_one_time_token():
     asyncio.run(scenario())
 
 
+def test_proxy_reregistration_preserves_existing_faketls_secret():
+    async def scenario():
+        engine, sessions = await database()
+        old_secret = "ee0123456789abcdef0123456789abcdef79612e7275"
+        node = TelegramProxyNode(name="France", secret=old_secret)
+        raw = issue_install_token(node)
+        async with sessions() as session:
+            session.add(node)
+            await session.commit()
+
+        async def override_session():
+            async with sessions() as session:
+                yield session
+
+        app.dependency_overrides[get_session] = override_session
+        with TestClient(app) as client:
+            response = client.post(
+                "/api/telegram-proxy/register",
+                json={
+                    "install_token": raw,
+                    "public_host": "proxy.example.com",
+                    "public_port": 443,
+                    "secret": "eeffffffffffffffffffffffffffffffff79612e7275",
+                    "agent_token": "new-agent-secret",
+                    "version": "1.4.0",
+                },
+            )
+            assert response.status_code == 200
+            assert response.json()["secret"] == old_secret
+        async with sessions() as session:
+            stored = await session.get(TelegramProxyNode, node.id)
+            assert stored.secret == old_secret
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+    asyncio.run(scenario())
+
+
 def test_mtg_faketls_config_and_bot_has_button():
     compose = render_compose(
         {

@@ -43,6 +43,14 @@ PUBLIC_HOST="${PUBLIC_HOST:-$(curl -fsSL https://api.ipify.org)}"
 
 curl -fsSL "$PANEL_URL/telegram-proxy/agent.py" -o agent.py
 curl -fsSL "$PANEL_URL/telegram-proxy/Dockerfile.agent" -o Dockerfile.agent
+REGISTRATION_RESPONSE="$(curl -fsSL -X POST "$PANEL_URL/api/telegram-proxy/register" \
+  -H 'Content-Type: application/json' \
+  -d "$(printf '{"install_token":"%s","public_host":"%s","public_port":443,"secret":"%s","agent_token":"%s","version":"1.4.0"}' "$INSTALL_TOKEN" "$PUBLIC_HOST" "$SECRET" "$AGENT_TOKEN")")"
+EFFECTIVE_SECRET="$(printf '%s' "$REGISTRATION_RESPONSE" | sed -n 's/.*"secret":"\([^"]*\)".*/\1/p')"
+[[ "$EFFECTIVE_SECRET" =~ ^ee[0-9a-f]+$ ]] || {
+  echo "Panel returned an invalid FakeTLS secret" >&2
+  exit 1
+}
 cat > compose.yaml <<EOF
 name: sumrak-telegram-proxy
 
@@ -52,7 +60,7 @@ services:
     container_name: sumrak-telegram-proxy
     restart: unless-stopped
     network_mode: host
-    command: ["simple-run", "0.0.0.0:443", "$SECRET"]
+    command: ["simple-run", "0.0.0.0:443", "$EFFECTIVE_SECRET"]
   agent:
     build:
       context: .
@@ -69,8 +77,5 @@ EOF
 docker compose build --no-cache agent
 docker compose run --rm --no-deps -T agent docker compose version </dev/null
 docker compose up -d proxy
-curl -fsSL -X POST "$PANEL_URL/api/telegram-proxy/register" \
-  -H 'Content-Type: application/json' \
-  -d "$(printf '{"install_token":"%s","public_host":"%s","public_port":443,"secret":"%s","agent_token":"%s","version":"1.4.0"}' "$INSTALL_TOKEN" "$PUBLIC_HOST" "$SECRET" "$AGENT_TOKEN")"
 docker compose up -d agent
 echo "Sumrak Telegram Proxy installed: $PUBLIC_HOST:443"
