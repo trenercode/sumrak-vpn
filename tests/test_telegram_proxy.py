@@ -108,7 +108,9 @@ def test_proxy_register_heartbeat_and_one_time_token():
             assert 'PANEL_URL="https://panel.example.com"' in install.text
             assert 'INSTALL_DIR="/opt/sumrak-telegram-proxy"' in install.text
             assert "TCP port 443 is already occupied" in install.text
-            assert "nineseconds/mtg:1" in install.text
+            assert "telegrammessenger/proxy:latest" in install.text
+            assert 'SECRET="$(openssl rand -hex 16)"' in install.text
+            assert '"secret":"dd%s"' in install.text
             assert "agent docker compose version </dev/null" in install.text
             dockerfile = client.get("/telegram-proxy/Dockerfile.agent")
             assert dockerfile.status_code == 200
@@ -155,10 +157,10 @@ def test_proxy_register_heartbeat_and_one_time_token():
     asyncio.run(scenario())
 
 
-def test_sponsor_tag_enters_proxy_command_and_bot_has_button():
+def test_official_mtproxy_config_and_bot_has_button():
     compose = render_compose(
         {
-            "secret": "ee-secret",
+            "secret": "dd0123456789abcdef0123456789abcdef",
             "sponsor_tag": "0123456789abcdef",
             "public_host": "151.243.3.15",
             "public_port": 443,
@@ -166,8 +168,10 @@ def test_sponsor_tag_enters_proxy_command_and_bot_has_button():
         }
     )
     assert compose.startswith("name: sumrak-telegram-proxy")
-    assert 'MTG_IPV4: "151.243.3.15:443"' in compose
-    assert 'command: ["run","ee-secret","0123456789abcdef"]' in compose
+    assert "image: telegrammessenger/proxy:latest" in compose
+    assert 'SECRET: "0123456789abcdef0123456789abcdef"' in compose
+    assert 'TAG: "0123456789abcdef"' in compose
+    assert '- "443:443"' in compose
     labels = [button.text for row in main_keyboard().inline_keyboard for button in row]
     assert "🔗 Прокси Telegram" in labels
 

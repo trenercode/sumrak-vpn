@@ -2,13 +2,10 @@ name: sumrak-telegram-proxy
 
 services:
   proxy:
-    image: nineseconds/mtg:1
+    image: telegrammessenger/proxy:latest
     container_name: sumrak-telegram-proxy
     restart: unless-stopped
-    command: ["run", "REPLACE_WITH_FAKETLS_SECRET"]
     environment:
-      MTG_BIND: 0.0.0.0:3128
-      MTG_IPV4: "REPLACE_WITH_PUBLIC_IP:443"
-      MTG_STATS_BIND: 0.0.0.0:3129
+      SECRET: "REPLACE_WITH_32_HEX_SECRET_WITHOUT_DD"
     ports:
-      - "443:3128"
+      - "443:443"

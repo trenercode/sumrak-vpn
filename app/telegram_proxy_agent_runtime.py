@@ -9,7 +9,7 @@ from pathlib import Path
 PANEL_URL = os.environ.get("PANEL_URL", "http://127.0.0.1:8000").rstrip("/")
 AGENT_TOKEN = os.environ.get("AGENT_TOKEN", "")
 DATA_DIR = Path("/data")
-VERSION = "1.0.3"
+VERSION = "1.2.0"
 
 
 def api(path, method="GET", payload=None):
@@ -28,22 +28,24 @@ def api(path, method="GET", payload=None):
 
 
 def render_compose(config):
-    tag = config.get("sponsor_tag", "")
-    command = json.dumps(["run", config["secret"]] + ([tag] if tag else []), separators=(",", ":"))
+    secret = config["secret"].removeprefix("dd")
+    environment = [f"SECRET={secret}"]
+    if config.get("sponsor_tag"):
+        environment.append(f"TAG={config['sponsor_tag']}")
+    environment_yaml = "\n".join(
+        f'      {item.split("=", 1)[0]}: "{item.split("=", 1)[1]}"' for item in environment
+    )
     return f"""name: sumrak-telegram-proxy
 
 services:
   proxy:
-    image: nineseconds/mtg:1
+    image: telegrammessenger/proxy:latest
     container_name: sumrak-telegram-proxy
     restart: unless-stopped
-    command: {command}
     environment:
-      MTG_BIND: 0.0.0.0:3128
-      MTG_IPV4: "{config['public_host']}:{config['public_port']}"
-      MTG_STATS_BIND: 0.0.0.0:3129
+{environment_yaml}
     ports:
-      - "{config['public_port']}:3128"
+      - "{config['public_port']}:443"
   agent:
     build:
       context: .
@@ -86,23 +88,7 @@ def sync():
 
 
 def metrics():
-    try:
-        with urllib.request.urlopen("http://proxy:3129/metrics", timeout=5) as response:
-            text = response.read().decode()
-    except Exception:
-        return None, None
-    values = {}
-    for line in text.splitlines():
-        if not line or line.startswith("#") or " " not in line:
-            continue
-        name, value = line.rsplit(" ", 1)
-        try:
-            values[name.split("{", 1)[0]] = float(value)
-        except ValueError:
-            continue
-    active = values.get("mtg_connections")
-    traffic = sum(value for name, value in values.items() if "traffic" in name)
-    return int(active) if active is not None else None, int(traffic) if traffic else None
+    return None, None
 
 
 def main():
